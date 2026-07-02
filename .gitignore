@@ -1,0 +1,13 @@
+node_modules
+.next
+next-env.d.ts
+*.tsbuildinfo
+
+# Secrets — commit .env.example instead, then `cp .env.example .env`
+.env
+
+# SQLite dev database (regenerate with `bun run db:reset`)
+*.db
+*.db-journal
+prisma/dev.db
+prisma/migrations/**/dev.db

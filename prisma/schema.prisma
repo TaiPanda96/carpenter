@@ -1,0 +1,22 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  // SQLite for zero-setup speed. Swap provider to "postgresql" if the
+  // challenge needs real timezone-aware timestamps or concurrency.
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+/// Reference entity for the walking skeleton. Rename/replace with the
+/// real domain entity when the challenge lands.
+model Item {
+  id        String   @id @default(uuid())
+  title     String
+  done      Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("items")
+}
