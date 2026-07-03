@@ -11,3 +11,7 @@ next-env.d.ts
 *.db-journal
 prisma/dev.db
 prisma/migrations/**/dev.db
+
+# Tmp files
+*.tmp
+/tmp

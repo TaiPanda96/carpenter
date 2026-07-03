@@ -88,3 +88,10 @@ Rules:
 `Context` = everything that touches the outside world.
 `ContextWith<K>` = a function honestly declaring what it touches.
 `createMockContext` = the same shape with the outside world swapped for fakes.
+
+
+### Workflow Mental Model To Keep
+This is the optimal co-pilot workflow
+```text
+/spec → /failure-modes → [author + Claude Code, interactive] → /qa
+```
