@@ -1,0 +1,18 @@
+{"id": "t01", "text": "I was charged twice for my subscription this month, please refund the duplicate.", "gold": "billing", "predicted": "billing"}
+{"id": "t02", "text": "Your invoice shows the wrong VAT rate for the EU.", "gold": "billing", "predicted": "billing"}
+{"id": "t03", "text": "Can I switch from monthly to annual and get the discount?", "gold": "billing", "predicted": "billing"}
+{"id": "t04", "text": "The receipt PDF won't download, it just spins forever.", "gold": "billing", "predicted": "technical"}
+{"id": "t05", "text": "Please update the card on file, the old one expired.", "gold": "billing", "predicted": "account"}
+{"id": "t06", "text": "Why is there a proration line I don't understand on my bill?", "gold": "billing", "predicted": "billing"}
+{"id": "t07", "text": "The app crashes on launch after the latest update on Android.", "gold": "technical", "predicted": "technical"}
+{"id": "t08", "text": "API returns 500 whenever I send more than 100 items in a batch.", "gold": "technical", "predicted": "technical"}
+{"id": "t09", "text": "Webhooks stopped firing sometime yesterday afternoon.", "gold": "technical", "predicted": "technical"}
+{"id": "t10", "text": "Export to CSV produces an empty file for large reports.", "gold": "technical", "predicted": "technical"}
+{"id": "t11", "text": "Getting rate-limited even though I'm well under my quota.", "gold": "technical", "predicted": "billing"}
+{"id": "t12", "text": "I can't log in, it says my email isn't recognized.", "gold": "account", "predicted": "account"}
+{"id": "t13", "text": "Please add my teammate as an admin on the workspace.", "gold": "account", "predicted": "account"}
+{"id": "t14", "text": "How do I enable two-factor authentication on my profile?", "gold": "account", "predicted": "account"}
+{"id": "t15", "text": "I want to delete my account and all associated data.", "gold": "account", "predicted": "billing"}
+{"id": "t16", "text": "Love the new dashboard, but a dark mode would be amazing.", "gold": "feedback", "predicted": "technical"}
+{"id": "t17", "text": "Honestly the onboarding flow could be a lot clearer.", "gold": "feedback", "predicted": "account"}
+{"id": "t18", "text": "Great support last week — just wanted to say thanks!", "gold": "feedback", "predicted": "billing"}
