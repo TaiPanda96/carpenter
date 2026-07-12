@@ -16,7 +16,10 @@
     "db:seed": "bun run prisma/seed.ts"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.12",
+    "@anthropic-ai/sdk": "^0.111.0",
     "@prisma/client": "^6.2.1",
+    "ai": "^7.0.22",
     "commander": "^15.0.0",
     "next": "^15.1.4",
     "react": "^19.0.0",

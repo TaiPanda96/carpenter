@@ -1,6 +1,6 @@
 "use server";
 
-import { createContext } from "@/lib/common/io/context/create-context";
+import { createContext } from "@/lib/common/create-context";
 import { createItem } from "@/lib/items/domain/create-item";
 import { revalidatePath } from "next/cache";
 

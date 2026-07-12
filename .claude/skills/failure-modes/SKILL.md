@@ -1,7 +1,7 @@
 ---
 name: failure-modes
 description: >
-  Stage 2 of the agentic pipeline that introduces an adversarial skill that checks a spec for potential failure modes. It does not
+  An adversarial skill that checks a spec for potential failure modes. It does not
   make design decisions, but rather identifies potential issues that could lead to
   failures in implementation. It flags ambiguous requirements, missing context,
   and other potential pitfalls that could cause the spec to be un-implementable or

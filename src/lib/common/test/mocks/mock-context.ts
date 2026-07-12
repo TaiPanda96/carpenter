@@ -1,4 +1,4 @@
-import type { Context } from '@/lib/common/io/context/create-context'
+import type { Context } from "@/lib/common/create-context";
 
 /**
  * Test mirror of createContext. Pass in exactly the fakes your unit under
@@ -11,6 +11,8 @@ import type { Context } from '@/lib/common/io/context/create-context'
  * await createItem(ctx, { title: 'x' })
  * ```
  */
-export function createMockContext<T extends Partial<Context>>(overrides: T = {} as T): Context & T {
-  return { ...overrides } as Context & T
+export function createMockContext<T extends Partial<Context>>(
+  overrides: T = {} as T,
+): Context & T {
+  return { ...overrides } as Context & T;
 }

@@ -78,11 +78,32 @@ Rules:
   `createContext`.
 
 ## Non-negotiable (for domain logic)
-- Every external input validated with Zod at the boundary before use.
+- External input validated with Zod at the boundary — see Trust Boundaries below
+  for the calibration (it is NOT "validate everything").
 - Every DB write wrapped in `ctx.prisma.$transaction(...)` for atomicity.
 - Domain logic is pure/ctx-injected and unit-tested with `bun:test`.
 - Errors: throw from domain (ZodError etc.); let the boundary catch. Keep
   boundary code thin.
+
+## Trust Boundaries & Runtime Validation (Zod)
+WHY Zod at all: a TypeScript type is erased at runtime — a compile-time promise
+about data, not a guarantee. Zod is that promise ENFORCED, at the seam where
+untrusted data enters deterministic code.
+
+A boundary = where data crosses from a source you DON'T control (network/API
+responses, user input, env, files, LLM output) into domain code. Validate THERE.
+
+Calibration (this is the part people get wrong):
+- Validate untrusted input ONCE, at the boundary. Never re-validate data your own
+  deterministic code just constructed — parsing your own output is a smell.
+- Validate a PROJECTION: only the fields you consume, not an exhaustive mirror.
+- ONE schema is the source of truth for a shape; derive the type via `z.infer`.
+  Never hand-maintain a parallel `interface` for the same shape.
+- LLM-specific: strictly validate model-GENERATED CONTENT (non-deterministic);
+  validate transport ENVELOPES (stop_reason, usage) with a light projection.
+- Normalize provider signals (stop/finish reason, errors) for the domain, but
+  RETAIN the raw signal alongside for observability.
+- Own retries in ONE layer. If the app orchestrates retries, disable the SDK's.
 
 ## Mental model to keep
 `Context` = everything that touches the outside world.
