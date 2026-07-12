@@ -1,11 +1,8 @@
 ---
-name: llm-adapter-skills
+name: enforcing-trust-boundaries
 description: >
-  Optional inspection stage for LLM adapter code. Reads an adapter that wraps a
-  provider SDK (Anthropic Messages API, Vercel AI SDK, etc.) and audits it
-  against the repo's trust-boundary and error-handling invariants (see
-  CLAUDE.md → Trust Boundaries). Read-only — surfaces violations as a report;
-  does not fix them.
+  Optional inspection stage for integrations that have LLM/trust boundaries. Reads an adapter that wraps a
+  provider SDK (Anthropic Messages API, Vercel AI SDK, etc.) and audits it against the repo's trust-boundary and error-handling invariants (see CLAUDE.md → Trust Boundaries). Read-only — surfaces violations as a report; does not fix them).
 disable-model-invocation: true
 argument-hint: "[adapter-path]"
 allowed-tools:
@@ -16,7 +13,6 @@ allowed-tools:
   - Bash(bun run:*)
   - Bash(bunx tsc:*)
   - Write
-model: claude-sonnet-4-6
 ---
 
 ### Prompt
@@ -77,9 +73,11 @@ invariant it maps to. FLAG is a finding, not a fix.
 Run `bunx tsc --noEmit`. New type errors in the adapter → FLAG: typecheck, list
 each. Pre-existing errors (present in `git diff` context) are noted as such.
 
-## Step 4 — Report
+## Step 4 — Report, But Think about Time Box
 
-Write `/tmp/llm-adapter-report.md`:
+If you had 5 feedback items that move the needle on trust boundaries, you would flag them. If you had 50, you would flag the top 5 and note the rest as "additional findings" in the report. The goal is to keep the inspection actionable within a time box.
+
+Write `/tmp/non-deterministic-trust-boundary-report.txt` with:
 
 - Adapter path + provider IO call (file:line).
 - A checklist table: Check | Status (PASS / FLAG) | file:line | Invariant.

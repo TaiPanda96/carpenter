@@ -17,7 +17,6 @@ allowed-tools:
   - Bash(git:*)
   - Bash(bun run:*)
   - Bash(bunx tsc:*)
-model: claude-sonnet-4-6
 ---
 
 ### Prompt
@@ -50,11 +49,14 @@ insert):
 - Spec that is too ambitious for the time box, leading to incomplete or rushed implementation
 - Spec that is too narrow in scope, leading to a system that does not meet the needs of the users or stakeholders
 
-## Output contract
+## Output Contract
 
-Do NOT modify the spec file.
+This skill will mutate the spec file in place, adding comments for any issues found. It will also produce a report of findings in `/tmp` for hand-off to the next stage of the pipeline.
 
-Write findings to stdout in this structure:
+- Add `BLOCKERS` in `[] FM-1` format to the `spec-NNN` file for any issues that must be resolved before implementation can proceed.
+- Add `WARNINGS` in `[] FM-2` format to the `spec-NNN` file for any issues that should be resolved, but won't block the agent from proceeding.
+
+Write findings to stdout in this structure in `/tmp` as a stateful hand-off artifact:
 
 # FAILURE MODES REPORT — spec-NNN
 

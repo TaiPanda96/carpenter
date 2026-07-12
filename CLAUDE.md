@@ -6,14 +6,14 @@ Load at session start. The goal of the invariants is to spend less time on setup
 The `items` slice is the REFERENCE PATTERN. To add a feature, mirror it; don't
 invent a new shape.
 
-## Operating Mode (timed build)
+## Operating Mode
 Priority order when time-constrained:
 1. Working vertical slice end-to-end  >  breadth of features
 2. Correct domain logic  >  test coverage
 3. Tests ONLY for domain logic that encodes business rules
 4. Skip tests for glue / framework wiring / UI unless asked
 
-Rules of engagement:
+Rules of Engagement:
 - Show a 3-line plan before starting a new slice.
 - Prefer editing existing files over creating new ones.
 - Commit per working vertical slice.
@@ -57,10 +57,10 @@ Files: kebab-case. One primary export per file. IO-touching modules get an
 ## Centralized Context (`ctx`) — the core pattern
 
 - All IO / external dependencies live behind a single `Context`. 
-- Domain functions
-never import a client (prisma, fetch, an SDK) directly — they receive `ctx` and
+- Domain functions never import a client (prisma, fetch, an SDK) directly — they receive `ctx` and
 declare the exact slice they need. This is the DI seam AND the test seam.
 
+## `ContextWith` pattern enables external dependencies to be explicitly modelled.
 Three load-bearing types in `src/lib/common/io/context/create-context.ts`:
 - `Context` — registry of every dependency, all optional.
 - `ContextWith<K> = Pick<Required<Context>, K>` — a function asks for exactly
@@ -76,6 +76,11 @@ Rules:
   `create-item.test.ts` for the reference.
 - Add a new dependency = add one optional field to `Context` + one line in
   `createContext`.
+
+## Mental Model To Keep
+`Context` = everything that touches the outside world.
+`ContextWith<K>` = a function honestly declaring what it touches.
+`createMockContext` = the same shape with the outside world swapped for fakes.
 
 ## Non-negotiable (for domain logic)
 - External input validated with Zod at the boundary — see Trust Boundaries below
@@ -105,14 +110,25 @@ Calibration (this is the part people get wrong):
   RETAIN the raw signal alongside for observability.
 - Own retries in ONE layer. If the app orchestrates retries, disable the SDK's.
 
-## Mental model to keep
-`Context` = everything that touches the outside world.
-`ContextWith<K>` = a function honestly declaring what it touches.
-`createMockContext` = the same shape with the outside world swapped for fakes.
-
 
 ### Workflow Mental Model To Keep
-This is the optimal co-pilot workflow
+The author drives a DAG. Each stage is a skill with a hard ROLE BOUNDARY: none of
+them decide anything. Decisions are the author's — that is the whole point.
+
 ```text
-/spec → /failure-modes → [author + Claude Code, interactive] → /qa
+/case → [author answers] → /spec → /failure-modes → [build] → /qa
+                                         ╰─ /grill-me and /enforcing-trust-boundaries
+                                            are on-demand, not on the critical path
 ```
+
+## Skills — Index By Indirection
+This is a mapping table of skills that can be invoked.
+
+| Stage | Skill | Input → Output | Role boundary (what it will NOT do) |
+|---|---|---|---|
+| -1 | `/case` | fixtures → `docs/CASE.md` | Evidence only. Counts come from a throwaway `src/bin/` script fitted to the fixture, never from a model's estimate. Names the decisions the data forces; does not make them. |
+| 0 | `/spec` | draft → `docs/specs/spec-NNN.md` | Fidelity only. Formalizes decisions already made; flags a BLOCKER rather than inventing a REQ. |
+| 1 | `/failure-modes` | spec → BLOCKERS + WARNINGS | Adversarial. Finds holes; does not fill them. |
+| — | `/grill-me` | spec or code → shared understanding | Interviews the author one question at a time. Recommends; never decides. |
+| — | `/enforcing-trust-boundaries` | LLM adapter → audit report | Read-only. Surfaces violations of the Trust Boundaries rules above; does not fix them. |
+| 3 | `/qa` | spec + code → REQ-by-REQ attestation | Verifies. Documents a failure and stops; does not repair. |

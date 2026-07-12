@@ -9,8 +9,9 @@ import { LlmClient, LlmRequest } from "../llm-client";
  * `stop_reason` and `usage` ourselves and normalize them onto the seam.
  *
  * Trust boundary: the ONE thing we runtime-validate is the wire response
- * (`anthropicResponseProjectionSchema`) — an external, drift-prone source. We
- * validate a PROJECTION (only the fields we consume), then trust our own
+ * (`anthropicResponseProjectionSchema`) — an external, drift-prone source.
+ *
+ * We validate a PROJECTION (only the fields we consume), then trust our own
  * deterministic mapping to `LlmResult`. No second parse of our own output.
  */
 const anthropicResponseProjectionSchema = z.object({
