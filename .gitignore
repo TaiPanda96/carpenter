@@ -15,3 +15,7 @@ prisma/migrations/**/dev.db
 # Tmp files
 *.tmp
 /tmp
+
+
+# Problems
+/docs/problems/

@@ -116,7 +116,7 @@ The author drives a DAG. Each stage is a skill with a hard ROLE BOUNDARY: none o
 them decide anything. Decisions are the author's — that is the whole point.
 
 ```text
-/case → [author answers] → /spec → /failure-modes → [build] → /qa
+[read_author_brief] -> /case → /spec → /failure-modes → [build] → /qa
                                          ╰─ /grill-me and /enforcing-trust-boundaries
                                             are on-demand, not on the critical path
 ```
