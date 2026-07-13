@@ -11,6 +11,7 @@
  * SDK, so we can swap providers and unit-test the domain with a fake.
  */
 
+import type { LlmObjectRequest, LlmObjectResult } from "./llm-object";
 import { LlmResult } from "./llm-response";
 
 export interface LlmRequest {
@@ -23,9 +24,16 @@ export interface LlmRequest {
   timeoutMs?: number;
 }
 
-/** The one method every adapter implements. Keep it small. */
+/** The methods every adapter implements. Keep it small. */
 export interface LlmClient {
   complete(req: LlmRequest): Promise<LlmResult>;
+  /**
+   * Prose out; structure in. Forced tool use under the hood, so the model has no
+   * way to answer EXCEPT by filling the caller's schema. It cannot be layered on
+   * top of `complete()`: `complete()` keeps only text blocks, and a forced tool
+   * call puts its answer in a `tool_use` block's `input`.
+   */
+  generateObject<T>(req: LlmObjectRequest<T>): Promise<LlmObjectResult<T>>;
   // TODO: add streaming support, e.g. `stream(req: LlmRequest): AsyncIterable<LlmResultChunk>`.
   // TODO: add Batch support, e.g. `batch(reqs: LlmRequest[]): Promise<LlmResult[]>`.
 }

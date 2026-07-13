@@ -46,7 +46,7 @@ bun run db:reset     # drop, migrate, reseed
 - Path alias: `@/*` → `src/*`.
 
 ## Repository Layout & Folder Preferences
-- `src/lib/**/domain/`   core business logic — pure where possible, ctx-injected
+- `src/lib/[entity]/domain/`   core business logic — pure where possible, ctx-injected
 - `src/lib/**/actions/`  server actions (thin boundary)
 - `src/lib/common/`      shared: prisma, config, the ctx factory, test mocks
 - `src/app/`             Next routes + UI
@@ -112,14 +112,7 @@ Calibration (this is the part people get wrong):
 
 
 ### Workflow Mental Model To Keep
-The author drives a DAG. Each stage is a skill with a hard ROLE BOUNDARY: none of
-them decide anything. Decisions are the author's — that is the whole point.
-
-```text
-[read_author_brief] -> /case → /spec → /failure-modes → [build] → /qa
-                                         ╰─ /grill-me and /enforcing-trust-boundaries
-                                            are on-demand, not on the critical path
-```
+/case  →  /grill-me  →  types (in code)  →  thin spec  →  build (fan out agents)  →  /qa
 
 ## Skills — Index By Indirection
 This is a mapping table of skills that can be invoked.

@@ -23,4 +23,10 @@ The decisions, though, are mine — put each one to me and wait for my answer.
 
 ### How I Want To Be Interviewed
 
+### Interview Strategy
+
 Walk down each branch of the design tree, resolving dependencies between decisions one-by-one. For each question, provide your recommended answer. Ask the questions one at a time, waiting for feedback on each question before continuing. If a fact can be found by exploring the codebase, look it up rather than asking me. The decisions, though, are mine — put each one to me and wait for my answer.
+
+### Interview Format: Multi-Selection Panels (Multiple Choice)
+
+Each decision needs to be committed in multiple choice format, so that it can be recorded in a structured way. Each question should have a set of options, and I will select one or more of them. If none of the options are correct, I will provide my own answer.

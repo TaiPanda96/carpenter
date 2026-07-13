@@ -71,7 +71,10 @@ export async function completeWithRetry(
       if (!e.retryable || attempt >= maxRetries) throw e;
 
       attempt++;
-      await ctx.sleep(backoffBaseMs * 2 ** (attempt - 1));
+      // The provider's own `retry-after` beats our guess: when the API states
+      // how long to wait, backing off less is a wasted call and backing off
+      // more is wasted time. Fall back to exponential only when it says nothing.
+      await ctx.sleep(e.retryAfterMs ?? backoffBaseMs * 2 ** (attempt - 1));
     }
   }
 }

@@ -18,6 +18,10 @@ export const llmErrorKindSchema = z.enum([
   "provider_unavailable",
   "provider_response_invalid",
   "output_validation",
+  /** The tool JSON was CUT OFF, not wrong (stop_reason: max_tokens). Retry with a bigger budget. */
+  "output_truncated",
+  /** The model ignored a FORCED tool and answered some other way. Retry. */
+  "tool_use_missing",
   "refusal",
   "aborted",
   "unknown",
@@ -77,9 +81,23 @@ export function isRetryableStatus(status: number | undefined): boolean {
   return status === 408 || status === 409 || status === 429 || status >= 500;
 }
 
-export function toValidationIssues(issues: z.ZodIssue[]): ValidationIssue[] {
+/**
+ * Flatten zod issues into a transport-safe, loggable shape.
+ *
+ * Typed structurally rather than as `z.ZodIssue[]` so that BOTH zod versions in
+ * play satisfy it: the wire projection is parsed with v3, while the model's
+ * generated object is parsed with the v4 schema (`llm-object.ts`, whose issues
+ * carry `path: PropertyKey[]`). One issue-flattener, no cast at either call site.
+ */
+export function toValidationIssues(
+  issues: readonly {
+    readonly path: readonly PropertyKey[];
+    readonly message: string;
+    readonly code?: string;
+  }[],
+): ValidationIssue[] {
   return issues.map((issue) => ({
-    path: issue.path.join("."),
+    path: issue.path.map(String).join("."),
     message: issue.message,
     code: issue.code,
   }));

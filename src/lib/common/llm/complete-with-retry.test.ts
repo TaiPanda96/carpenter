@@ -32,7 +32,10 @@ describe("completeWithRetry", () => {
   it("returns immediately on success — no retry, no sleep", async () => {
     const complete = mock(async () => ok());
     const { sleep, calls } = fakeSleep();
-    const ctx = createMockContext({ llm: { complete } as LlmClient, sleep });
+    const ctx = createMockContext({
+      llm: { complete } as unknown as LlmClient,
+      sleep,
+    });
 
     const res = await completeWithRetry(ctx, REQ);
 
@@ -55,7 +58,10 @@ describe("completeWithRetry", () => {
       return ok();
     });
     const { sleep, calls } = fakeSleep();
-    const ctx = createMockContext({ llm: { complete } as LlmClient, sleep });
+    const ctx = createMockContext({
+      llm: { complete } as unknown as LlmClient,
+      sleep,
+    });
 
     const res = await completeWithRetry(ctx, REQ, { backoffBaseMs: 10 });
 
@@ -73,7 +79,10 @@ describe("completeWithRetry", () => {
       });
     });
     const { sleep, calls } = fakeSleep();
-    const ctx = createMockContext({ llm: { complete } as LlmClient, sleep });
+    const ctx = createMockContext({
+      llm: { complete } as unknown as LlmClient,
+      sleep,
+    });
 
     await expect(completeWithRetry(ctx, REQ)).rejects.toThrow("bad request");
     expect(complete).toHaveBeenCalledTimes(1); // no retry
@@ -89,7 +98,10 @@ describe("completeWithRetry", () => {
       });
     });
     const { sleep, calls } = fakeSleep();
-    const ctx = createMockContext({ llm: { complete } as LlmClient, sleep });
+    const ctx = createMockContext({
+      llm: { complete } as unknown as LlmClient,
+      sleep,
+    });
 
     await expect(
       completeWithRetry(ctx, REQ, { maxRetries: 2, backoffBaseMs: 10 }),
@@ -104,7 +116,10 @@ describe("completeWithRetry", () => {
       ok({ stop: { kind: "refusal", providerReason: "refusal" }, text: "" }),
     );
     const { sleep, calls } = fakeSleep();
-    const ctx = createMockContext({ llm: { complete } as LlmClient, sleep });
+    const ctx = createMockContext({
+      llm: { complete } as unknown as LlmClient,
+      sleep,
+    });
 
     await expect(completeWithRetry(ctx, REQ)).rejects.toThrow("refused");
     expect(complete).toHaveBeenCalledTimes(1); // refusal is not retried

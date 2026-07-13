@@ -7,22 +7,9 @@ scope: standard
 ## Goal
 [One sentence. Imperative. Concrete.]
 
-## Context Discovery
-- Use indirection as the main form of efficient context assembly
- - `src/lib` - domain logic lives here
- - `src/lib/common/io` - IO logic lives here.
- - `src/lib/common/io/context/create-context.ts` - context instantiation for the repository. Each external dependency is declared explicitly here.
- - `src/lib/items` - this is an example implementation of `domain` and `actions` (server-actions)
-
-## Requirements
+## Requirements (file: `src/lib` action `Add/Modify/Delete`)
 - REQ-1: [specific, observable, atomic]
 - REQ-2: ...
-
-## File Mapping
-| File | Action |
-|------|--------|
-| `src/lib/newModule.ts` | Create |
-| `src/types.ts` | Modify — add X type |
 
 ## Constraints
 - Prefer functions over classes in domain & io functions
@@ -30,6 +17,14 @@ scope: standard
     - use the `.safeParse()`
     - on validation failure, capture the `zodIssues` as part of the logging meta-data
 - Typed errors, no throwing strings
+
+## Ascii Diagram of Solution
+```ascii
+
+```
+
+## Acceptance Criteria
+- Requirements implemented, with decisions on open questions resolved by the user
 
 ## Definition of Done
 - [ ] `bun run typecheck` passes
