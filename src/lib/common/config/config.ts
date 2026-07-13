@@ -4,11 +4,11 @@
  * process.env directly. Add fields here as the app needs them.
  */
 export interface Config {
-  nodeEnv: string;
-  anthropicApiKey: string;
+  nodeEnv: string
+  anthropicApiKey: string
 }
 
 export const config: Config = {
-  nodeEnv: process.env.NODE_ENV ?? "development",
-  anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? "",
-};
+  nodeEnv: process.env.NODE_ENV ?? 'development',
+  anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? '',
+}

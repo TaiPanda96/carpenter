@@ -20,5 +20,24 @@
       "quoteStyle": "single",
       "semicolons": "asNeeded"
     }
-  }
+  },
+  "overrides": [
+    {
+      "include": ["src/lib/**/domain/**"],
+      "linter": {
+        "rules": {
+          "nursery": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/lib/common/llm/expect-complete": "Domain code must NOT unwrap an LlmOutcome. expectComplete() destroys route/reason/signals, which makes the calling function uncomposable: nobody downstream can retry it, chunk it, batch it, or account for its token cost. RETURN the LlmOutcome and let the boundary (a server action, a route handler, a script) decide. The LlmOutcome type itself is fine to import — it lives in ./llm-outcome."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
 }

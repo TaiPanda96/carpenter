@@ -22,7 +22,6 @@ scope: standard
 ```ascii
 
 ```
-
 ## Acceptance Criteria
 - Requirements implemented, with decisions on open questions resolved by the user
 

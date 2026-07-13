@@ -46,6 +46,14 @@ bun run dev             # http://localhost:3000
 - `src/lib/common/io/context/create-context.ts` — the `ctx` factory + types
 - `src/lib/common/test/mocks/mock-context.ts` — test mirror
 
+## The LLM seam
+
+If the challenge involves a model call, the layer is already built and already argued:
+**[`src/lib/common/llm/README.md`](src/lib/common/llm/README.md)** is its decision record —
+every choice with the alternative it rejected and what breaks if it's wrong, plus the
+questions you'll get asked and the gaps to name before someone finds them. Review it ahead
+of time; on the day, you spend the decision, not the typing.
+
 ## Rehearse before the real thing
 
 Run 2–3 timed mock challenges (URL shortener, small inventory app) starting from

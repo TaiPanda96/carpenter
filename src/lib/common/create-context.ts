@@ -1,7 +1,7 @@
 import { type Config, config } from "@/lib/common/config/config";
+import { createAnthropicClient } from "./llm/anthropic/anthropic-adapter.io";
+import type { LlmClient } from "./llm/contract/client";
 import { getPrismaClient } from "@/lib/common/prisma";
-import { createAnthropicClient } from "@/lib/common/llm/anthropic/anthropic-adapter";
-import type { LlmClient } from "@/lib/common/llm/llm-client";
 import type { PrismaClient } from "@prisma/client";
 
 /**
@@ -18,6 +18,12 @@ export interface Context {
   llm?: LlmClient;
   /** Clock. Injected so retry/backoff is deterministic and instant in tests. */
   sleep?: (ms: number) => Promise<void>;
+  /**
+   * Entropy, in [0, 1). Injected for the same reason as `sleep`: backoff jitter is
+   * load-bearing (it desynchronizes a fleet that got rate-limited together), and a
+   * test cannot assert on a delay it cannot predict.
+   */
+  random?: () => number;
 }
 
 /**
@@ -54,6 +60,7 @@ export async function createContext<K extends readonly (keyof Context)[]>(
       ctx.sleep =
         overrides.sleep ??
         ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+    if (key === "random") ctx.random = overrides.random ?? Math.random;
   }
 
   return ctx as ContextWith<K[number]>;
