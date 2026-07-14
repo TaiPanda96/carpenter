@@ -22,9 +22,9 @@
  * SDK, so we can swap providers and unit-test the domain with a fake.
  */
 
-import type { LlmObjectRequest } from './llm-object'
-import type { LlmOutcome } from './llm-outcome'
-import type { LlmCompletion, LlmObjectValue } from './llm-response'
+import type { LlmObjectRequest } from './object-request'
+import type { LlmOutcome } from './outcome'
+import type { LlmCompletion, LlmObjectValue } from './response'
 
 /**
  * The per-request timeout when the caller names none.
