@@ -7,7 +7,7 @@ import type { LlmOutcome } from './contract/outcome'
  * — it is a lint failure, not a convention you have to remember at 2am.
  *
  * It lives in its own file precisely so that ban can be surgical: domain code
- * still imports the `LlmOutcome` TYPE from `llm-outcome.ts` (it must — that is
+ * still imports the `LlmOutcome` TYPE from `contract/outcome.ts` (it must — that is
  * what it returns), and only the unwrap is out of reach.
  *
  * WHY: unwrapping is lossy, and a domain function that unwraps becomes

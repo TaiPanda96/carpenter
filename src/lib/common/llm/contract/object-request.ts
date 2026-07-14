@@ -27,8 +27,8 @@ export interface LlmObjectRequest<T> {
  * The caller's zod schema as JSON Schema, ready to hand a provider as a tool's
  * input schema.
  *
- * It lives here, not in the adapter, so `zod/v4` stays contained to the two
- * files the spec allows (OPEN-3). `io: 'input'` is deliberate: we describe what
+ * It lives here, not in the adapter, so the JSON-Schema conversion sits next to
+ * the request contract it serves. `io: 'input'` is deliberate: we describe what
  * the model must PRODUCE (the schema's input side), which differs from the
  * output side the moment a schema has a default or a transform.
  *

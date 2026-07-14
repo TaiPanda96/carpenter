@@ -59,10 +59,10 @@ export class LlmError extends Error {
 /**
  * Flatten zod issues into a transport-safe, loggable shape.
  *
- * Typed structurally rather than as `z.ZodIssue[]` so that BOTH zod versions in
- * play satisfy it: the wire projection is parsed with v3, while the model's
- * generated object is parsed with the v4 schema (`llm-object.ts`, whose issues
- * carry `path: PropertyKey[]`). One issue-flattener, no cast at either call site.
+ * Typed structurally rather than as `z.core.$ZodIssue[]` so this stays decoupled
+ * from zod's issue type: both the wire projection and the model's generated
+ * object are parsed with `zod/v4` (whose issues carry `path: PropertyKey[]`), and
+ * a structural shape flattens either with no cast at the call site.
  */
 export function toValidationIssues(
   issues: readonly {

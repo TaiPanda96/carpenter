@@ -204,28 +204,33 @@ Being able to name your own holes is most of what "defensible" means.
 4. **`cancelled` drops accumulated spend.** Its `usage` is typed `null`, so a cancel after a
    paid retry loses that cost. Correct-by-type, wrong-by-accounting. (Moot until gap #2.)
 5. **The `CONTEXT_WINDOW` table is hardcoded.** It's verified against the live Models API in
-   CI (`model-limits.test.ts`) rather than at boot — deliberate, so the seam stays testable
+   CI (`anthropic/model-limits.test.ts`) rather than at boot — deliberate, so the seam stays testable
    without IO. But CI must actually run for that to be true.
 
 ## Where it lives
 
 ```
-llm-disposition.ts   the taxonomy — routes and reasons. A pure leaf; imports nothing.
-llm-outcome.ts       LlmOutcome<T> — the discriminated union everything switches on.
-llm-errors.ts        LlmError — carries the route, not a second private taxonomy.
-llm-client.ts        the REQUEST contract + the LlmClient interface. The provider seam.
-llm-response.ts      the RESULT contract — what the model SAID and what it COST.
-llm-object.ts        the structured-output seam. ONE schema drives the ask and the check.
-llm-retry.ts         the loop. Four budgets. Owns backoff, jitter, budget growth.
-anthropic/           the ONLY file that knows the vendor exists.
-  anthropic-adapter.ts   raw signals -> LlmOutcome. The lossy translation, done once.
-  model-limits.ts        context windows + the free estimator gating the paid pre-flight.
+contract/          provider-agnostic types — no vendor, no IO. The seam consumers depend on.
+  disposition.ts       the taxonomy — routes and reasons. A pure leaf; imports nothing.
+  outcome.ts           LlmOutcome<T> — the discriminated union everything switches on.
+  errors.ts            LlmError — carries the route, not a second private taxonomy.
+  client.ts            the REQUEST contract + the LlmClient interface. The provider seam.
+  response.ts          the RESULT contract — what the model SAID and what it COST.
+  object-request.ts    the structured-output seam. ONE schema drives the ask and the check.
+retry/             the in-process remedies, run over the routed seam.
+  with-llm-retry.ts               the loop. Four budgets. Owns backoff, jitter, budget growth.
+  complete-with-retry.ts          prose entry point — wraps the loop, returns a routed outcome.
+  generate-object-with-retry.ts   structured entry point — the sibling, same seam & options.
+expect-complete.ts   unwrap-or-throw. BOUNDARY ONLY — biome.json bans it from domain/.
+anthropic/         the ONLY files that know the vendor exists.
+  anthropic-adapter.io.ts  raw signals -> LlmOutcome. The lossy translation, done once.
+  model-limits.ts          context windows + the free estimator gating the paid pre-flight.
 ```
 
 Tests sit on the two things that are business rules: **the classification table**
-(`anthropic-adapter.test.ts` — pure functions over provider signals, no network, no mocked
-SDK) and **the remedy budgets** (`llm-retry.test.ts` — fake `sleep`, fake `random`, no real
-waiting). Nothing tests the glue.
+(`anthropic/anthropic-adapter.io.test.ts` — pure functions over provider signals, no network,
+no mocked SDK) and **the remedy budgets** (`retry/with-llm-retry.test.ts` — fake `sleep`, fake
+`random`, no real waiting). Nothing tests the glue.
 
 
 

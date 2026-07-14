@@ -4,7 +4,7 @@
  * `LlmError` needs these types, and `LlmOutcome` needs `LlmError`. Keeping the
  * taxonomy in a leaf breaks what would otherwise be an import cycle:
  *
- *   llm-disposition (this file)  ->  llm-errors  ->  llm-outcome
+ *   disposition (this file)  ->  errors  ->  outcome
  *
  * This is the ONE taxonomy. There used to be a second — `LlmError.kind` plus an
  * `isRetryableStatus()` helper — that cut the same space differently: `kind`
@@ -55,7 +55,7 @@ export type RetryReason =
    * Under `tool_choice: {type: 'tool'}` the model is FORCED, so this should be
    * near-impossible. If it happens twice it will happen a third time — which is
    * why it draws on its own tiny budget rather than the rate-limit pool. See
-   * `maxResamples` in `llm-retry.ts`.
+   * `maxResamples` in `retry/with-llm-retry.ts`.
    */
   | 'model_noncompliant'
 

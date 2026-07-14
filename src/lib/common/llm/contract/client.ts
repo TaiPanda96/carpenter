@@ -1,7 +1,7 @@
 /**
  * The provider-agnostic LLM seam.
  *
- * `llm-outcome.ts` owns the ROUTING contract, `llm-response.ts` owns the RESULT
+ * `outcome.ts` owns the ROUTING contract, `response.ts` owns the RESULT
  * contract (runtime-validated, because a response crosses a trust boundary we do
  * not control). This file owns the REQUEST contract — a plain compile-time type,
  * because the request is constructed by our own deterministic domain code, so

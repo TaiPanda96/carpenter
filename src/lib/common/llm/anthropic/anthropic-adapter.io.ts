@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
-import { z } from 'zod'
+import { z } from 'zod/v4'
 import { DEFAULT_TIMEOUT_MS, type LlmClient, type LlmRequest } from '../contract/client'
 import type { DecomposeReason, LlmSignals } from '../contract/disposition'
 import { LlmError, toValidationIssues } from '../contract/errors'

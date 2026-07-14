@@ -1,4 +1,4 @@
-import { z } from 'zod'
+import { z } from 'zod/v4'
 
 /** Validation schema for item input — the boundary contract. */
 export const itemInputSchema = z.object({

@@ -10,7 +10,7 @@
  *
  * Validate untrusted input ONCE, at the boundary. This is not the boundary.
  *
- * The routing decision does NOT live here — it lives in `llm-disposition.ts`,
+ * The routing decision does NOT live here — it lives in `disposition.ts`,
  * because it is provider-agnostic and it is what consumers actually switch on.
  */
 
