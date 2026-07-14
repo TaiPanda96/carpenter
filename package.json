@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "rm -f tsconfig.tsbuildinfo && tsc --noEmit",
     "lint": "biome check .",
     "format": "biome format --write .",
     "test": "bun test",
