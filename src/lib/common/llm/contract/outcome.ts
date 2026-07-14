@@ -1,11 +1,6 @@
-import {
-  LlmSignals,
-  RetryReason,
-  DecomposeReason,
-  DeadLetterReason,
-} from "./disposition";
-import { LlmError } from "./errors";
-import { LlmUsage } from "./response";
+import type { DeadLetterReason, DecomposeReason, LlmSignals, RetryReason } from './disposition'
+import type { LlmError } from './errors'
+import type { LlmUsage } from './response'
 
 /**
  * The normalized outcome of one model call. This IS the triage table:
@@ -36,43 +31,43 @@ import { LlmUsage } from "./response";
  */
 export type LlmOutcome<T> =
   | {
-      route: "complete";
-      value: T;
-      usage: LlmUsage;
-      signals: LlmSignals;
+      route: 'complete'
+      value: T
+      usage: LlmUsage
+      signals: LlmSignals
     }
   | {
-      route: "retry";
-      reason: RetryReason;
+      route: 'retry'
+      reason: RetryReason
       /** From the provider's `retry-after` header. Null = use your own backoff. */
-      retryAfterMs: number | null;
-      error: LlmError;
-      usage: LlmUsage | null;
-      signals: LlmSignals;
+      retryAfterMs: number | null
+      error: LlmError
+      usage: LlmUsage | null
+      signals: LlmSignals
     }
   | {
-      route: "decompose";
-      reason: DecomposeReason;
-      error: LlmError;
-      usage: LlmUsage | null;
-      signals: LlmSignals;
+      route: 'decompose'
+      reason: DecomposeReason
+      error: LlmError
+      usage: LlmUsage | null
+      signals: LlmSignals
     }
   | {
-      route: "dead_letter";
-      reason: DeadLetterReason;
-      error: LlmError;
-      usage: LlmUsage | null;
-      signals: LlmSignals;
+      route: 'dead_letter'
+      reason: DeadLetterReason
+      error: LlmError
+      usage: LlmUsage | null
+      signals: LlmSignals
     }
   | {
-      route: "cancelled";
-      error: LlmError;
-      usage: null;
-      signals: LlmSignals;
+      route: 'cancelled'
+      error: LlmError
+      usage: null
+      signals: LlmSignals
     }
   | {
-      route: "alert";
-      error: LlmError;
-      usage: LlmUsage | null;
-      signals: LlmSignals;
-    };
+      route: 'alert'
+      error: LlmError
+      usage: LlmUsage | null
+      signals: LlmSignals
+    }

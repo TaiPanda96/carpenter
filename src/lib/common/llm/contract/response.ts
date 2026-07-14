@@ -23,12 +23,12 @@
  * would look identical to a cache that stopped WORKING.
  */
 export interface LlmUsage {
-  inputTokens: number;
-  outputTokens: number;
+  inputTokens: number
+  outputTokens: number
   /** Tokens served from the prompt cache (~0.1x price). Null = not reported. */
-  cacheReadTokens: number | null;
+  cacheReadTokens: number | null
   /** Tokens written to the prompt cache (~1.25x price). Null = not reported. */
-  cacheWriteTokens: number | null;
+  cacheWriteTokens: number | null
 }
 
 /**
@@ -42,14 +42,14 @@ export interface LlmUsage {
  * normalization stays auditable.
  */
 export type LlmCompletionStop =
-  | { kind: "complete"; providerReason: "end_turn" }
-  | { kind: "stop_sequence"; providerReason: "stop_sequence" }
+  | { kind: 'complete'; providerReason: 'end_turn' }
+  | { kind: 'stop_sequence'; providerReason: 'stop_sequence' }
   /** Output was CUT at the cap; the input fit fine. REMEDY: raise the budget. */
-  | { kind: "max_tokens"; providerReason: "max_tokens" }
+  | { kind: 'max_tokens'; providerReason: 'max_tokens' }
   /** The INPUT did not fit. A bigger output budget cannot fix this. REMEDY: chunk it. */
   | {
-      kind: "context_window_exceeded";
-      providerReason: "model_context_window_exceeded";
+      kind: 'context_window_exceeded'
+      providerReason: 'model_context_window_exceeded'
     }
   /**
    * The model is waiting on a tool result. Terminal ONLY for `generateObject`, where
@@ -57,14 +57,14 @@ export type LlmCompletionStop =
    * this is impossible, and the adapter routes it to `alert` rather than inventing a
    * meaning for it.
    */
-  | { kind: "tool_use"; providerReason: "tool_use" }
-  | { kind: "refusal"; providerReason: "refusal" }
-  | { kind: "other"; providerReason: string | null };
+  | { kind: 'tool_use'; providerReason: 'tool_use' }
+  | { kind: 'refusal'; providerReason: 'refusal' }
+  | { kind: 'other'; providerReason: string | null }
 
 /** What `complete()` produces when the model answers in prose. */
 export interface LlmCompletion {
-  text: string;
-  stop: LlmCompletionStop;
+  text: string
+  stop: LlmCompletionStop
 }
 
 /**
@@ -75,9 +75,9 @@ export interface LlmCompletion {
  * actually said.
  */
 export interface LlmObjectValue<T> {
-  object: T;
-  raw: unknown;
-  stop: LlmCompletionStop;
+  object: T
+  raw: unknown
+  stop: LlmCompletionStop
 }
 
 /**
@@ -94,22 +94,19 @@ export interface LlmObjectValue<T> {
  * NEITHER attempt reported a cache field, the total has not reported it either. Only
  * once some attempt reports a number does the sum become a number.
  */
-export function addUsage(
-  a: LlmUsage | null,
-  b: LlmUsage | null,
-): LlmUsage | null {
-  if (a === null) return b;
-  if (b === null) return a;
+export function addUsage(a: LlmUsage | null, b: LlmUsage | null): LlmUsage | null {
+  if (a === null) return b
+  if (b === null) return a
   return {
     inputTokens: a.inputTokens + b.inputTokens,
     outputTokens: a.outputTokens + b.outputTokens,
     cacheReadTokens: addReported(a.cacheReadTokens, b.cacheReadTokens),
     cacheWriteTokens: addReported(a.cacheWriteTokens, b.cacheWriteTokens),
-  };
+  }
 }
 
 /** `null + null` is still "not reported". `null + 5` is 5 — one attempt reported. */
 function addReported(a: number | null, b: number | null): number | null {
-  if (a === null && b === null) return null;
-  return (a ?? 0) + (b ?? 0);
+  if (a === null && b === null) return null
+  return (a ?? 0) + (b ?? 0)
 }

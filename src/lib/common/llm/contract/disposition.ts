@@ -27,12 +27,12 @@
  * switch over this union to handle it — loudly, which is the point.
  */
 export type LlmRoute =
-  | "complete" // emit the result
-  | "retry" // retry queue, backoff(retryAfterMs)
-  | "decompose" // chunk queue — see DecomposeReason, the remedy differs
-  | "dead_letter" // human review
-  | "cancelled" // the caller walked away. Not a failure; nobody to page.
-  | "alert"; // we do not know what this is. Page someone.
+  | 'complete' // emit the result
+  | 'retry' // retry queue, backoff(retryAfterMs)
+  | 'decompose' // chunk queue — see DecomposeReason, the remedy differs
+  | 'dead_letter' // human review
+  | 'cancelled' // the caller walked away. Not a failure; nobody to page.
+  | 'alert' // we do not know what this is. Page someone.
 
 /**
  * Transient. The payload is fine; the world was busy. Same payload, backoff.
@@ -42,11 +42,11 @@ export type LlmRoute =
  * capacity rather than breakage, and `model_noncompliant` is not a backoff at all.
  */
 export type RetryReason =
-  | "rate_limit" // 429
-  | "overloaded" // 529 — capacity, not breakage. The SDK lumps this in with 5xx.
-  | "server_error" // 5xx
-  | "timeout"
-  | "network"
+  | 'rate_limit' // 429
+  | 'overloaded' // 529 — capacity, not breakage. The SDK lumps this in with 5xx.
+  | 'server_error' // 5xx
+  | 'timeout'
+  | 'network'
   /**
    * The transport succeeded; the MODEL did not comply — it ignored a forced tool
    * and answered some other way. Nothing is broken and nothing is busy, so the
@@ -57,7 +57,7 @@ export type RetryReason =
    * why it draws on its own tiny budget rather than the rate-limit pool. See
    * `maxResamples` in `llm-retry.ts`.
    */
-  | "model_noncompliant";
+  | 'model_noncompliant'
 
 /**
  * The PAYLOAD is the problem. Retrying the same bytes burns money and changes
@@ -81,18 +81,18 @@ export type RetryReason =
  * Chunking a document that fit fine will still truncate. Raising the output
  * budget on a prompt that never fit will still fail. Same queue, opposite remedy.
  */
-export type DecomposeReason = "input_too_large" | "output_truncated";
+export type DecomposeReason = 'input_too_large' | 'output_truncated'
 
 /** Needs a human. No amount of waiting or reshaping fixes these. */
 export type DeadLetterReason =
-  | "refusal" // a 200 OK whose content must not be used
-  | "invalid_output" // the model answered in the wrong shape
-  | "invalid_request" // we built a bad request — our bug
-  | "auth" // 401/403. Dead-letters so the job survives; alert on the reason.
-  | "not_found"; // bad model id — our bug
+  | 'refusal' // a 200 OK whose content must not be used
+  | 'invalid_output' // the model answered in the wrong shape
+  | 'invalid_request' // we built a bad request — our bug
+  | 'auth' // 401/403. Dead-letters so the job survives; alert on the reason.
+  | 'not_found' // bad model id — our bug
 
 /** Every reason, across the routes that carry one. */
-export type LlmReason = RetryReason | DecomposeReason | DeadLetterReason;
+export type LlmReason = RetryReason | DecomposeReason | DeadLetterReason
 
 /**
  * The raw provider signal, retained ALONGSIDE the normalization.
@@ -107,12 +107,12 @@ export type LlmReason = RetryReason | DecomposeReason | DeadLetterReason;
  * better home for that than a second enum nobody keeps in sync.
  */
 export interface LlmSignals {
-  provider: "anthropic";
+  provider: 'anthropic'
   /** Untouched `stop_reason` off the wire. Null when the call never landed. */
-  rawStopReason: string | null;
-  httpStatus: number | null;
+  rawStopReason: string | null
+  httpStatus: number | null
   /** The provider's own error code, e.g. `rate_limit_error`, `overloaded_error`. */
-  providerCode: string | null;
-  requestId: string | null;
-  model: string | null;
+  providerCode: string | null
+  requestId: string | null
+  model: string | null
 }

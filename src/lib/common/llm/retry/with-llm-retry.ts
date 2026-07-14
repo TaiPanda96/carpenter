@@ -1,7 +1,7 @@
-import type { ContextWith } from "@/lib/common/create-context";
-import { DEFAULT_TIMEOUT_MS } from "../contract/client";
-import { LlmOutcome } from "../contract/outcome";
-import { LlmUsage, addUsage } from "../contract/response";
+import type { ContextWith } from '@/lib/common/create-context'
+import { DEFAULT_TIMEOUT_MS } from '../contract/client'
+import type { LlmOutcome } from '../contract/outcome'
+import { type LlmUsage, addUsage } from '../contract/response'
 
 /**
  * The retry loop, over the routed seam.
@@ -76,18 +76,18 @@ import { LlmUsage, addUsage } from "../contract/response";
  */
 export interface RetryOptions {
   /** Backoff attempts for a transient failure. Cheap — costs time. Default 4. */
-  maxTransientRetries?: number;
+  maxTransientRetries?: number
   /**
    * Resends of a request that MAY ALREADY HAVE RUN (timeout / dropped connection).
    * Each one risks paying and generating twice — see DOUBLE-BILL. Default 1.
    */
-  maxUnconfirmedRetries?: number;
+  maxUnconfirmedRetries?: number
   /** Budget doublings after a truncation. Exponential in money. Default 2. */
-  maxBudgetDoublings?: number;
+  maxBudgetDoublings?: number
   /** Resamples after the model ignores a forced tool. It will not comply. Default 1. */
-  maxResamples?: number;
+  maxResamples?: number
   /** Base backoff in ms; the exponential is `base * 2^(attempt-1)`. Default 200. */
-  backoffBaseMs?: number;
+  backoffBaseMs?: number
   /**
    * The longest we are willing to BLOCK in-process. Default 30s.
    *
@@ -95,87 +95,79 @@ export interface RetryOptions {
    * seventeen minutes. And it is the line past which a `retry-after` is no longer
    * ours to honour: see `PARK` in the loop.
    */
-  maxBackoffMs?: number;
+  maxBackoffMs?: number
   /**
    * Spread added on top of a `retry-after` we are obeying. Default 1s.
    *
    * The provider hands every rate-limited client the SAME number, so obeying it
    * exactly re-synchronizes the fleet it was supposed to spread out.
    */
-  jitterMs?: number;
+  jitterMs?: number
   /**
    * Ceiling for the budget doubling. Default 16k — above that the SDK wants
    * streaming anyway. The budget is CLAMPED to it, not gated by it: see the
    * truncation branch.
    */
-  maxTokensCeiling?: number;
+  maxTokensCeiling?: number
   /**
    * Ceiling for the timeout that grows with the budget. Default 2 minutes.
    *
    * A non-streaming request that needs longer than this has a streaming problem,
    * not a timeout-tuning problem.
    */
-  maxTimeoutMs?: number;
+  maxTimeoutMs?: number
 }
 
-export async function withLlmRetry<
-  Req extends { maxTokens: number; timeoutMs?: number },
-  T,
->(
+export async function withLlmRetry<Req extends { maxTokens: number; timeoutMs?: number }, T>(
   // Only `'sleep'` and `'random'`, NOT `'llm'`. The model is reached through the
   // `call` closure, so this function never touches `ctx.llm` — and `ContextWith`
   // exists precisely so that a signature cannot lie about the IO it performs.
   // Declaring `'llm'` here would be claiming an IO surface it does not have.
-  ctx: ContextWith<"sleep" | "random">,
+  ctx: ContextWith<'sleep' | 'random'>,
   req: Req,
   call: (req: Req) => Promise<LlmOutcome<T>>,
   opts: RetryOptions = {},
 ): Promise<LlmOutcome<T>> {
-  const maxTransientRetries = opts.maxTransientRetries ?? 4;
-  const maxUnconfirmedRetries = opts.maxUnconfirmedRetries ?? 1;
-  const maxBudgetDoublings = opts.maxBudgetDoublings ?? 2;
-  const maxResamples = opts.maxResamples ?? 1;
-  const backoffBaseMs = opts.backoffBaseMs ?? 200;
-  const maxBackoffMs = opts.maxBackoffMs ?? 30_000;
-  const jitterMs = opts.jitterMs ?? 1_000;
-  const maxTokensCeiling = opts.maxTokensCeiling ?? 16_000;
-  const maxTimeoutMs = opts.maxTimeoutMs ?? 120_000;
+  const maxTransientRetries = opts.maxTransientRetries ?? 4
+  const maxUnconfirmedRetries = opts.maxUnconfirmedRetries ?? 1
+  const maxBudgetDoublings = opts.maxBudgetDoublings ?? 2
+  const maxResamples = opts.maxResamples ?? 1
+  const backoffBaseMs = opts.backoffBaseMs ?? 200
+  const maxBackoffMs = opts.maxBackoffMs ?? 30_000
+  const jitterMs = opts.jitterMs ?? 1_000
+  const maxTokensCeiling = opts.maxTokensCeiling ?? 16_000
+  const maxTimeoutMs = opts.maxTimeoutMs ?? 120_000
 
-  let transient = 0;
-  let unconfirmed = 0;
-  let doublings = 0;
-  let resamples = 0;
-  let current = req; // never mutate the caller's request
+  let transient = 0
+  let unconfirmed = 0
+  let doublings = 0
+  let resamples = 0
+  let current = req // never mutate the caller's request
 
   // The running bill. Every attempt's usage lands here, so what we finally return
   // is what the JOB cost, not what its last attempt cost.
-  let spent: LlmUsage | null = null;
+  let spent: LlmUsage | null = null
 
   for (;;) {
-    const outcome = await call(current);
-    spent = addUsage(spent, outcome.usage);
+    const outcome = await call(current)
+    spent = addUsage(spent, outcome.usage)
 
-    if (outcome.route === "retry") {
+    if (outcome.route === 'retry') {
       // A forced tool that did not fire is not a backoff. Nothing is busy and
       // nothing is broken — resample immediately, and give up fast.
-      if (outcome.reason === "model_noncompliant") {
-        if (resamples >= maxResamples) return billed(outcome, spent);
-        resamples++;
-        continue; // no sleep: there is nothing to wait for
+      if (outcome.reason === 'model_noncompliant') {
+        if (resamples >= maxResamples) return billed(outcome, spent)
+        resamples++
+        continue // no sleep: there is nothing to wait for
       }
 
       // Did the request RUN? A 429/529/5xx says no — the server answered, refusing.
       // A timeout or a dead connection says we do not know, and a resend may pay for
       // the same generation twice. Separate budget, and a much smaller one.
-      const mayHaveRun =
-        outcome.reason === "timeout" || outcome.reason === "network";
+      const mayHaveRun = outcome.reason === 'timeout' || outcome.reason === 'network'
 
-      if (
-        mayHaveRun
-          ? unconfirmed >= maxUnconfirmedRetries
-          : transient >= maxTransientRetries
-      ) {
-        return billed(outcome, spent);
+      if (mayHaveRun ? unconfirmed >= maxUnconfirmedRetries : transient >= maxTransientRetries) {
+        return billed(outcome, spent)
       }
 
       // PARK. The provider told us to wait longer than we are willing to BLOCK for.
@@ -183,14 +175,11 @@ export async function withLlmRetry<
       // as long as the header says — and the header is not ours to bound. So hand the
       // job back INTACT: `outcome.retryAfterMs` still says when to come back, and a
       // queue can park it for that long without occupying anything.
-      if (
-        outcome.retryAfterMs !== null &&
-        outcome.retryAfterMs > maxBackoffMs
-      ) {
-        return billed(outcome, spent);
+      if (outcome.retryAfterMs !== null && outcome.retryAfterMs > maxBackoffMs) {
+        return billed(outcome, spent)
       }
 
-      const attempt = mayHaveRun ? ++unconfirmed : ++transient;
+      const attempt = mayHaveRun ? ++unconfirmed : ++transient
 
       await ctx.sleep(
         backoffMs(outcome.retryAfterMs, attempt, ctx.random, {
@@ -198,14 +187,11 @@ export async function withLlmRetry<
           maxBackoffMs,
           jitterMs,
         }),
-      );
-      continue;
+      )
+      continue
     }
 
-    if (
-      outcome.route === "decompose" &&
-      outcome.reason === "output_truncated"
-    ) {
+    if (outcome.route === 'decompose' && outcome.reason === 'output_truncated') {
       // THE GATE. Two questions, and nothing else escalates:
       //
       //     already AT the ceiling?  ──yes──► escalate to the chunk queue
@@ -228,15 +214,12 @@ export async function withLlmRetry<
       // Gating on the doubled value strands every budget that is not an exact power of
       // two below the ceiling, and quietly ships jobs to the chunk queue that a bigger
       // budget would have finished.
-      if (
-        doublings >= maxBudgetDoublings ||
-        current.maxTokens >= maxTokensCeiling
-      ) {
-        return billed(outcome, spent);
+      if (doublings >= maxBudgetDoublings || current.maxTokens >= maxTokensCeiling) {
+        return billed(outcome, spent)
       }
 
-      const grown = Math.min(current.maxTokens * 2, maxTokensCeiling);
-      doublings++;
+      const grown = Math.min(current.maxTokens * 2, maxTokensCeiling)
+      doublings++
       current = {
         ...current,
         maxTokens: grown,
@@ -245,13 +228,13 @@ export async function withLlmRetry<
         // old one in place means the remedy for the truncation manufactures a
         // timeout, which then routes as `retry` and hides the real cause (the budget).
         timeoutMs: grownTimeoutMs(current, grown, maxTimeoutMs),
-      };
+      }
       // No backoff: nothing is busy and nothing is broken. We asked for an answer
       // that did not fit. Sleeping here would only add latency.
-      continue;
+      continue
     }
 
-    return billed(outcome, spent);
+    return billed(outcome, spent)
   }
 }
 
@@ -286,18 +269,15 @@ function backoffMs(
   // The provider TOLD us how long to wait, so waiting less is just a wasted call.
   // Jitter therefore goes strictly ON TOP — never subtracted from what it asked for.
   if (retryAfterMs !== null) {
-    return retryAfterMs + Math.round(random() * opts.jitterMs);
+    return retryAfterMs + Math.round(random() * opts.jitterMs)
   }
 
-  const exponential = Math.min(
-    opts.backoffBaseMs * 2 ** (attempt - 1),
-    opts.maxBackoffMs,
-  );
+  const exponential = Math.min(opts.backoffBaseMs * 2 ** (attempt - 1), opts.maxBackoffMs)
 
   // Equal jitter: half the window is guaranteed, so we genuinely back off; the other
   // half is random, so two clients that failed on the same tick do not retry on the
   // same tick. (Full jitter would allow a ~0ms retry, which is not a backoff at all.)
-  return Math.round(exponential / 2 + random() * (exponential / 2));
+  return Math.round(exponential / 2 + random() * (exponential / 2))
 }
 
 /** Scale the timeout by the same factor the budget grew, then clamp. */
@@ -306,9 +286,9 @@ function grownTimeoutMs(
   grown: number,
   maxTimeoutMs: number,
 ): number {
-  const base = current.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const scaled = Math.ceil((base * grown) / current.maxTokens);
-  return Math.min(scaled, maxTimeoutMs);
+  const base = current.timeoutMs ?? DEFAULT_TIMEOUT_MS
+  const scaled = Math.ceil((base * grown) / current.maxTokens)
+  return Math.min(scaled, maxTimeoutMs)
 }
 
 /**
@@ -318,12 +298,8 @@ function grownTimeoutMs(
  * walked away, and the union says so. That is a deliberate modelling choice upstream,
  * not something to quietly widen from here.
  */
-function billed<T>(
-  outcome: LlmOutcome<T>,
-  spent: LlmUsage | null,
-): LlmOutcome<T> {
-  if (outcome.route === "cancelled") return outcome;
-  if (outcome.route === "complete")
-    return { ...outcome, usage: spent ?? outcome.usage };
-  return { ...outcome, usage: spent };
+function billed<T>(outcome: LlmOutcome<T>, spent: LlmUsage | null): LlmOutcome<T> {
+  if (outcome.route === 'cancelled') return outcome
+  if (outcome.route === 'complete') return { ...outcome, usage: spent ?? outcome.usage }
+  return { ...outcome, usage: spent }
 }

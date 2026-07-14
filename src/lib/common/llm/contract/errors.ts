@@ -1,25 +1,25 @@
-import { LlmRoute, LlmReason, LlmSignals } from "./disposition";
+import type { LlmReason, LlmRoute, LlmSignals } from './disposition'
 
 export interface ValidationIssue {
-  path: string;
-  message: string;
-  code?: string;
+  path: string
+  message: string
+  code?: string
 }
 
 export interface LlmErrorOptions {
   /** WHAT TO DO. The triage decision, computed once, in the adapter. */
-  route: LlmRoute;
+  route: LlmRoute
   /** WHY, at the granularity anyone acts on. Absent on routes that carry none. */
-  reason?: LlmReason;
-  message: string;
+  reason?: LlmReason
+  message: string
   /** The provider's own `retry-after`, in ms. Only meaningful on `route: 'retry'`. */
-  retryAfterMs?: number;
+  retryAfterMs?: number
   /** The raw receipt. Always present, even when the call never landed. */
-  signals: LlmSignals;
+  signals: LlmSignals
   /** Which field the model got wrong, for the human in the DLQ. */
-  issues?: ValidationIssue[];
+  issues?: ValidationIssue[]
   /** The underlying throwable, if any. Standard `Error.cause`. */
-  cause?: unknown;
+  cause?: unknown
 }
 
 /**
@@ -38,21 +38,21 @@ export interface LlmErrorOptions {
  * that one holds the underlying throwable, and shadowing it would be a trap.
  */
 export class LlmError extends Error {
-  readonly route: LlmRoute;
-  readonly reason?: LlmReason;
-  readonly retryAfterMs?: number;
-  readonly signals: LlmSignals;
-  readonly issues?: ValidationIssue[];
+  readonly route: LlmRoute
+  readonly reason?: LlmReason
+  readonly retryAfterMs?: number
+  readonly signals: LlmSignals
+  readonly issues?: ValidationIssue[]
 
   constructor(options: LlmErrorOptions) {
-    super(options.message, { cause: options.cause });
+    super(options.message, { cause: options.cause })
 
-    this.name = "LlmError";
-    this.route = options.route;
-    this.reason = options.reason;
-    this.retryAfterMs = options.retryAfterMs;
-    this.signals = options.signals;
-    this.issues = options.issues;
+    this.name = 'LlmError'
+    this.route = options.route
+    this.reason = options.reason
+    this.retryAfterMs = options.retryAfterMs
+    this.signals = options.signals
+    this.issues = options.issues
   }
 }
 
@@ -66,14 +66,14 @@ export class LlmError extends Error {
  */
 export function toValidationIssues(
   issues: readonly {
-    readonly path: readonly PropertyKey[];
-    readonly message: string;
-    readonly code?: string;
+    readonly path: readonly PropertyKey[]
+    readonly message: string
+    readonly code?: string
   }[],
 ): ValidationIssue[] {
   return issues.map((issue) => ({
-    path: issue.path.map(String).join("."),
+    path: issue.path.map(String).join('.'),
     message: issue.message,
     code: issue.code,
-  }));
+  }))
 }

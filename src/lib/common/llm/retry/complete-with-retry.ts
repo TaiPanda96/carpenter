@@ -1,8 +1,8 @@
-import type { ContextWith } from "@/lib/common/create-context";
-import { LlmRequest } from "../contract/client";
-import { LlmOutcome } from "../contract/outcome";
-import { LlmCompletion } from "../contract/response";
-import { RetryOptions, withLlmRetry } from "./with-llm-retry";
+import type { ContextWith } from '@/lib/common/create-context'
+import type { LlmRequest } from '../contract/client'
+import type { LlmOutcome } from '../contract/outcome'
+import type { LlmCompletion } from '../contract/response'
+import { type RetryOptions, withLlmRetry } from './with-llm-retry'
 
 /**
  * Call the model for prose, executing the in-process remedies (backoff, budget
@@ -32,9 +32,9 @@ import { RetryOptions, withLlmRetry } from "./with-llm-retry";
  * uncomposable.
  */
 export async function completeWithRetry(
-  ctx: ContextWith<"llm" | "sleep" | "random">,
+  ctx: ContextWith<'llm' | 'sleep' | 'random'>,
   req: LlmRequest,
   opts: RetryOptions = {},
 ): Promise<LlmOutcome<LlmCompletion>> {
-  return withLlmRetry(ctx, req, (r) => ctx.llm.complete(r), opts);
+  return withLlmRetry(ctx, req, (r) => ctx.llm.complete(r), opts)
 }

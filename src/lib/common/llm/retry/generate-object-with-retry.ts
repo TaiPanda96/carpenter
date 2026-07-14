@@ -1,8 +1,8 @@
-import type { ContextWith } from "@/lib/common/create-context";
-import { LlmObjectRequest } from "../contract/object-request";
-import { LlmOutcome } from "../contract/outcome";
-import { LlmObjectValue } from "../contract/response";
-import { RetryOptions, withLlmRetry } from "./with-llm-retry";
+import type { ContextWith } from '@/lib/common/create-context'
+import type { LlmObjectRequest } from '../contract/object-request'
+import type { LlmOutcome } from '../contract/outcome'
+import type { LlmObjectValue } from '../contract/response'
+import { type RetryOptions, withLlmRetry } from './with-llm-retry'
 
 /**
  * Call the model for a STRUCTURED object. The sibling of `completeWithRetry` —
@@ -39,9 +39,9 @@ import { RetryOptions, withLlmRetry } from "./with-llm-retry";
  * if (outcome.route === 'complete') use(outcome.value.object)
  */
 export async function generateObjectWithRetry<T>(
-  ctx: ContextWith<"llm" | "sleep" | "random">,
+  ctx: ContextWith<'llm' | 'sleep' | 'random'>,
   req: LlmObjectRequest<T>,
   opts: RetryOptions = {},
 ): Promise<LlmOutcome<LlmObjectValue<T>>> {
-  return withLlmRetry(ctx, req, (r) => ctx.llm.generateObject(r), opts);
+  return withLlmRetry(ctx, req, (r) => ctx.llm.generateObject(r), opts)
 }

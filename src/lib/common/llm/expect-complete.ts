@@ -1,4 +1,4 @@
-import type { LlmOutcome } from "./contract/outcome";
+import type { LlmOutcome } from './contract/outcome'
 
 /**
  * Unwrap an outcome, throwing on any failure route.
@@ -26,6 +26,6 @@ import type { LlmOutcome } from "./contract/outcome";
  * `signals`, so even a `catch` block can triage if it wants to.
  */
 export function expectComplete<T>(outcome: LlmOutcome<T>): T {
-  if (outcome.route === "complete") return outcome.value;
-  throw outcome.error;
+  if (outcome.route === 'complete') return outcome.value
+  throw outcome.error
 }

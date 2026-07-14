@@ -1,4 +1,4 @@
-import { z } from "zod/v4";
+import { z } from 'zod/v4'
 
 /**
  * A request for a structured object rather than prose.
@@ -8,19 +8,19 @@ import { z } from "zod/v4";
  * constructs it, so there is nothing untrusted here to parse.
  */
 export interface LlmObjectRequest<T> {
-  model: string;
-  system?: string;
-  prompt: string;
+  model: string
+  system?: string
+  prompt: string
   /** Hard cap on output tokens. Too low truncates the tool JSON — see `output_truncated`. */
-  maxTokens: number;
+  maxTokens: number
   /** Per-request timeout in ms, forwarded to the SDK. */
-  timeoutMs?: number;
+  timeoutMs?: number
   /** Source of truth for BOTH the tool's `input_schema` and the response validator. */
-  schema: z.ZodType<T>;
+  schema: z.ZodType<T>
   /** The forced tool's name. The model is given no other way to answer. */
-  toolName: string;
+  toolName: string
   /** Sent to the model verbatim; the more it knows about the tool, the better it fills it. */
-  toolDescription?: string;
+  toolDescription?: string
 }
 
 /**
@@ -37,7 +37,7 @@ export interface LlmObjectRequest<T> {
  */
 export function toJsonSchema<T>(schema: z.ZodType<T>): Record<string, unknown> {
   const { $schema: _dialect, ...jsonSchema } = z.toJSONSchema(schema, {
-    io: "input",
-  });
-  return jsonSchema;
+    io: 'input',
+  })
+  return jsonSchema
 }
