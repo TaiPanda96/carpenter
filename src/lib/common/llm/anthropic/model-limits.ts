@@ -23,6 +23,29 @@ export const CONTEXT_WINDOW: Record<string, number> = {
 }
 
 /**
+ * Max OUTPUT tokens per model — the hard ceiling on `max_tokens`. Verified against
+ * the Models API in CI, same as the window.
+ *
+ * WHY THIS EXISTS: `max_tokens` is a CAP, not a reservation. You are billed for the
+ * tokens the model actually emits, so asking for 64k and getting 800 costs exactly
+ * what asking for 1k and getting 800 costs. A tight cap therefore buys nothing in the
+ * happy path and costs a whole discarded generation in the truncation path — the
+ * model cannot resume a cut-off answer, so the only remedy is to throw it away and
+ * pay again.
+ *
+ * That asymmetry is the argument for setting `maxTokens` generously and letting it be
+ * a blast-radius guard against a looping model, rather than a number you expect to
+ * hit. The adapter clamps to this table so a caller asking for more than the model
+ * can emit gets a request that runs instead of a 400.
+ */
+export const MAX_OUTPUT_TOKENS: Record<string, number> = {
+  'claude-opus-4-8': 128_000,
+  'claude-opus-4-7': 128_000,
+  'claude-sonnet-5': 128_000,
+  'claude-haiku-4-5': 64_000,
+}
+
+/**
  * Chars per token, for the FREE pre-flight estimate.
  *
  * The familiar `chars/4` rule of thumb comes from OpenAI's tokenizer and
@@ -53,6 +76,19 @@ const PREFLIGHT_THRESHOLD = 0.9
  */
 export function contextWindow(model: string): number | undefined {
   return CONTEXT_WINDOW[model]
+}
+
+/**
+ * `undefined` for a model we have no entry for.
+ *
+ * Same rule as `contextWindow`: do NOT substitute a guess. The adapter uses this only
+ * to CLAMP a caller's `maxTokens` down to what the model can actually emit, so an
+ * unknown model simply means the caller's number is passed through untouched — the
+ * provider will reject it if it is wrong, which is a better failure than us silently
+ * capping a request against a ceiling we invented.
+ */
+export function maxOutputTokens(model: string): number | undefined {
+  return MAX_OUTPUT_TOKENS[model]
 }
 
 /** Free, deterministic, no network. Biased to over-count — see `CHARS_PER_TOKEN`. */

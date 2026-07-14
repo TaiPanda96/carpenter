@@ -1,12 +1,35 @@
 import { describe, expect, it } from 'bun:test'
 import Anthropic from '@anthropic-ai/sdk'
-import { CONTEXT_WINDOW, contextWindow, estimateTokens, needsTokenPreflight } from './model-limits'
+import {
+  CONTEXT_WINDOW,
+  MAX_OUTPUT_TOKENS,
+  contextWindow,
+  estimateTokens,
+  maxOutputTokens,
+  needsTokenPreflight,
+} from './model-limits'
 
 describe('contextWindow', () => {
   it('returns undefined for an unknown model rather than guessing', () => {
     // A guessed window is worse than none. Defaulting to 200k against a 1M-window
     // model would reject valid prompts as "too large" and chunk them for nothing.
     expect(contextWindow('claude-from-the-future')).toBeUndefined()
+  })
+})
+
+describe('maxOutputTokens', () => {
+  it('returns undefined for an unknown model rather than guessing', () => {
+    // Same rule as the window: the adapter only uses this to CLAMP a caller's cap, so
+    // an unknown model means "pass the caller's number through". Inventing a ceiling
+    // here would silently shrink a request against a limit we made up.
+    expect(maxOutputTokens('claude-from-the-future')).toBeUndefined()
+  })
+
+  it('is NOT the same as the context window — they are different limits', () => {
+    // 1M in, 128k out. Collapsing them into one "limit" is how you end up sending
+    // max_tokens: 1_000_000 and getting a 400.
+    expect(maxOutputTokens('claude-opus-4-8')).toBe(128_000)
+    expect(contextWindow('claude-opus-4-8')).toBe(1_000_000)
   })
 })
 
@@ -52,17 +75,26 @@ describe('needsTokenPreflight', () => {
  *
  * Skips cleanly without a key so `bun test` still runs offline and in CI forks.
  */
-describe('CONTEXT_WINDOW drift', () => {
+describe('model limits drift', () => {
   const apiKey = process.env.ANTHROPIC_API_KEY
 
   it.skipIf(!apiKey)('matches the live Models API', async () => {
     const sdk = new Anthropic({ apiKey })
 
-    for (const [model, expected] of Object.entries(CONTEXT_WINDOW)) {
+    for (const model of Object.keys(CONTEXT_WINDOW)) {
       const live = await sdk.models.retrieve(model)
-      expect({ model, window: live.max_input_tokens }).toEqual({
+
+      // Both tables in one pass — one round trip per model carries both numbers, and
+      // an output ceiling that drifts is exactly as damaging as an input one: too low
+      // strands budget, too high is a 400 on every request.
+      expect({
         model,
-        window: expected,
+        window: live.max_input_tokens,
+        output: live.max_tokens,
+      }).toEqual({
+        model,
+        window: CONTEXT_WINDOW[model],
+        output: MAX_OUTPUT_TOKENS[model],
       })
     }
   })

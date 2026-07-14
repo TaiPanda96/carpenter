@@ -1,4 +1,5 @@
 import { z } from 'zod/v4'
+import type { LlmThinking } from './client'
 
 /**
  * A request for a structured object rather than prose.
@@ -11,7 +12,21 @@ export interface LlmObjectRequest<T> {
   model: string
   system?: string
   prompt: string
-  /** Hard cap on output tokens. Too low truncates the tool JSON — see `output_truncated`. */
+  /**
+   * Reasoning depth. Defaults to `adaptive` — see `LlmThinking`.
+   *
+   * Resist the temptation to set `disabled` just because the output is structured. The
+   * forced tool pins the SHAPE of the answer; it does nothing for the reasoning that
+   * fills it, and a schema is very good at making a hard extraction look mechanical.
+   */
+  thinking?: LlmThinking
+  /**
+   * Hard cap on output tokens. Set it GENEROUSLY — see `LlmRequest.maxTokens`.
+   *
+   * Too low and the tool JSON is CUT OFF mid-object, which cannot be continued: the
+   * only remedy is a resample that throws the paid-for generation away, so the adapter
+   * does not attempt one. It routes `output_truncated` to the chunk queue instead.
+   */
   maxTokens: number
   /** Per-request timeout in ms, forwarded to the SDK. */
   timeoutMs?: number

@@ -1,6 +1,11 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { z } from 'zod/v4'
-import { DEFAULT_TIMEOUT_MS, type LlmClient, type LlmRequest } from '../contract/client'
+import {
+  DEFAULT_TIMEOUT_MS,
+  type LlmClient,
+  type LlmRequest,
+  type LlmThinking,
+} from '../contract/client'
 import type { DecomposeReason, LlmSignals } from '../contract/disposition'
 import { LlmError, toValidationIssues } from '../contract/errors'
 import { type LlmObjectRequest, toJsonSchema } from '../contract/object-request'
@@ -11,7 +16,7 @@ import type {
   LlmObjectValue,
   LlmUsage,
 } from '../contract/response'
-import { contextWindow, needsTokenPreflight } from './model-limits'
+import { contextWindow, maxOutputTokens, needsTokenPreflight } from './model-limits'
 
 /**
  * Raw `@anthropic-ai/sdk` adapter.
@@ -25,6 +30,20 @@ import { contextWindow, needsTokenPreflight } from './model-limits'
  * It does not THROW on operational failure. A 429, a refusal, a truncation and a
  * 529 are planned-for states, so they are values. Exceptions are reserved for
  * things nobody planned for (a missing API key).
+ *
+ * EVERY REQUEST IS STREAMED, and that fact does not escape this file — `complete()`
+ * and `generateObject()` still return one resolved value, because `finalMessage()`
+ * hands back the same `Message` shape `create()` did. Nothing above this line knows
+ * or cares.
+ *
+ * The reason is not latency; it is that a non-streaming `create()` must hold one HTTP
+ * response open for the whole generation, so it starts timing out somewhere around
+ * 16k output tokens. That single fact used to leak all the way up: it forced a low
+ * `max_tokens`, which made truncation COMMON, which is why `withLlmRetry` grew a
+ * budget-doubling loop that paid for the same generation two and three times over.
+ * Streaming removes the constraint, so `max_tokens` can be what it actually is — a
+ * cap, not a reservation (see `model-limits.ts`) — and a truncation goes back to
+ * meaning what it should: this answer does not fit in the model's output ceiling.
  *
  * Trust boundary: the ONE thing we runtime-validate is the wire response
  * (`anthropicResponseProjectionSchema`) — an external, drift-prone source. We
@@ -59,6 +78,37 @@ const anthropicToolUseBlockSchema = z.object({
   input: z.unknown(),
 })
 
+/**
+ * Thinking is set EXPLICITLY on every request, and that is the load-bearing word.
+ *
+ * OMITTING the field does not mean the same thing on every model we support: on
+ * `claude-opus-4-8` / `4-7` it means no thinking, and on `claude-sonnet-5` it means
+ * ADAPTIVE thinking. Since thinking tokens are drawn from the same `max_tokens` budget
+ * as the answer, an omitted field would make the identical request cost — and truncate
+ * — differently on different models, for a reason nobody wrote down.
+ *
+ * WHICH value is the caller's call, not ours: it is a genuine quality/cost trade and it
+ * lands differently on prose than on a forced-tool extraction. It defaults to
+ * `adaptive`, because thinking is the biggest quality lever available and the reason to
+ * fear it (a tight `max_tokens` that reasoning could eat) is gone. See `LlmThinking`.
+ */
+export function thinkingConfig(mode: LlmThinking | undefined): Anthropic.ThinkingConfigParam {
+  return mode === 'disabled' ? { type: 'disabled' } : { type: 'adaptive' }
+}
+
+/**
+ * The caller's cap, clamped to what the model can actually emit.
+ *
+ * A caller is expected to set `maxTokens` GENEROUSLY (it is a cap, not a reservation —
+ * see `model-limits.ts`), and the natural consequence is a number that sometimes
+ * exceeds the model's own ceiling. Clamping turns that into a request that runs;
+ * forwarding it verbatim turns it into a 400 that dead-letters a healthy job.
+ */
+function outputBudget(req: { model: string; maxTokens: number }): number {
+  const ceiling = maxOutputTokens(req.model)
+  return ceiling === undefined ? req.maxTokens : Math.min(req.maxTokens, ceiling)
+}
+
 export function createAnthropicClient(apiKey: string): LlmClient {
   // Throws. A missing key is a deployment error, not a routable outcome — there
   // is no queue that fixes it.
@@ -68,6 +118,21 @@ export function createAnthropicClient(apiKey: string): LlmClient {
   // owns them, so the SDK's are disabled to avoid retry multiplication
   // (2 SDK retries x N app retries).
   const sdk = new Anthropic({ apiKey: parsedApiKey, maxRetries: 0 })
+
+  /**
+   * The one place a request actually leaves the process.
+   *
+   * `.stream(...).finalMessage()` resolves to the same `Message` that `.create()`
+   * returned, so the streaming is a transport detail and nothing above sees it. The
+   * SDK surfaces the same typed errors on the same classes, so `routeThrownError`
+   * needs no change either.
+   */
+  async function send(
+    params: Anthropic.MessageStreamParams,
+    timeoutMs: number | undefined,
+  ): Promise<unknown> {
+    return sdk.messages.stream(params, { timeout: timeoutMs ?? DEFAULT_TIMEOUT_MS }).finalMessage()
+  }
 
   async function countTokens(req: LlmRequest | LlmObjectRequest<unknown>): Promise<number> {
     const counted = await sdk.messages.countTokens({
@@ -137,16 +202,19 @@ export function createAnthropicClient(apiKey: string): LlmClient {
       const oversized = await preflightInputSize(req)
       if (oversized) return oversized
 
+      const budget = outputBudget(req)
+
       let response: unknown
       try {
-        response = await sdk.messages.create(
+        response = await send(
           {
             model: req.model,
-            max_tokens: req.maxTokens,
+            max_tokens: budget,
+            thinking: thinkingConfig(req.thinking),
             system: req.system,
             messages: [{ role: 'user', content: req.prompt }],
           },
-          { timeout: req.timeoutMs ?? DEFAULT_TIMEOUT_MS },
+          req.timeoutMs,
         )
       } catch (error) {
         return routeThrownError(error)
@@ -159,7 +227,7 @@ export function createAnthropicClient(apiKey: string): LlmClient {
       const usage = mapUsage(parsed.data)
       const signals = signalsFromResponse(parsed.data)
 
-      const failure = routeNonTerminalStop(stop, usage, signals, req.maxTokens)
+      const failure = routeNonTerminalStop(stop, usage, signals, budget)
       if (failure) return failure
 
       // content is an array of blocks — concat the text ones. Never assume
@@ -179,17 +247,20 @@ export function createAnthropicClient(apiKey: string): LlmClient {
       const oversized = await preflightInputSize(req)
       if (oversized) return oversized
 
+      const budget = outputBudget(req)
+
       let response: unknown
       try {
-        response = await sdk.messages.create(
+        response = await send(
           {
             model: req.model,
-            max_tokens: req.maxTokens,
+            max_tokens: budget,
+            thinking: thinkingConfig(req.thinking),
             system: req.system,
             messages: [{ role: 'user', content: req.prompt }],
-            // FORCED tool use: the caller's schema is the only shape the model can
-            // answer in. One schema drives both the ask (`input_schema`) and the
-            // check (safeParse below) — they cannot drift apart.
+            // OFFERED, not forced. One schema still drives both the ask
+            // (`input_schema`) and the check (safeParse below), so they cannot drift.
+            // See `tool_choice` below for why the model is not compelled to use it.
             tools: [
               {
                 name: req.toolName,
@@ -201,9 +272,36 @@ export function createAnthropicClient(apiKey: string): LlmClient {
                 input_schema: toJsonSchema(req.schema) as Anthropic.Tool.InputSchema,
               },
             ],
-            tool_choice: { type: 'tool', name: req.toolName },
+            // `auto`, NOT `{type: 'tool'}`. This is the least obvious line in the file.
+            //
+            // Forcing a tool makes the model emit the tool call IMMEDIATELY — and that
+            // turns out to suppress reasoning entirely. Measured, same prompt, an
+            // invoice total needing two arithmetic steps and a threshold check:
+            //
+            //   tool_choice          thinking   blocks                   out    answer
+            //   ─────────────────────────────────────────────────────────────────────
+            //   {type: 'tool'}       adaptive   tool_use                  63    211.86 ✗
+            //   {type: 'tool'}       disabled   tool_use                  63    208.25 ✗
+            //   {type: 'any'}        adaptive   tool_use                  69    210.55 ✗
+            //   'auto'               adaptive   thinking,text,tool_use   369    209.07 ✓
+            //
+            // Note the token counts: under a forced tool, adaptive and disabled cost
+            // the SAME 63 tokens. No thinking block is emitted at all — the `thinking`
+            // parameter is inert. The model pattern-matches straight into the schema.
+            //
+            // And the failure is the worst kind this seam can produce: a well-formed
+            // object that passes Zod, trips no route, and is confidently wrong. Every
+            // piece of the triage machinery is blind to it. A forced tool guarantees
+            // the SHAPE of an answer and buys nothing for the reasoning that fills it —
+            // which is precisely the work a schema makes look mechanical.
+            //
+            // The cost of `auto` is that the model MAY answer in prose instead. That is
+            // exactly `retry/model_noncompliant`, which already exists below with its
+            // own resample budget — the route was written for this and was unreachable
+            // while the tool was forced.
+            tool_choice: { type: 'auto' },
           },
-          { timeout: req.timeoutMs ?? DEFAULT_TIMEOUT_MS },
+          req.timeoutMs,
         )
       } catch (error) {
         return routeThrownError(error)
@@ -216,13 +314,13 @@ export function createAnthropicClient(apiKey: string): LlmClient {
       const usage = mapUsage(parsed.data)
       const signals = signalsFromResponse(parsed.data)
 
-      // Here — and ONLY here — a `tool_use` stop is a terminal success: it is the
-      // forced tool firing, which is the answer. There is no tool to run and no
-      // loop to continue. `complete()` treats the same raw signal as impossible
-      // (it sends no tools). Same wire value, opposite meaning, because the request
-      // differed — which is exactly why this mapping belongs in the adapter.
+      // Here — and ONLY here — a `tool_use` stop is a terminal success: the offered
+      // tool fired, and its `input` IS the answer. There is no tool to run and no loop
+      // to continue. `complete()` treats the same raw signal as impossible (it sends no
+      // tools). Same wire value, opposite meaning, because the request differed — which
+      // is exactly why this mapping belongs in the adapter.
       if (stop.kind !== 'tool_use') {
-        const failure = routeNonTerminalStop(stop, usage, signals, req.maxTokens)
+        const failure = routeNonTerminalStop(stop, usage, signals, budget)
         // Checked BEFORE looking for the block: on `max_tokens` the tool JSON is CUT
         // OFF, so a block may be present but half-written. Parsing it would fail
         // schema validation and we would dead-letter a job whose real problem is a
@@ -230,8 +328,9 @@ export function createAnthropicClient(apiKey: string): LlmClient {
         if (failure) return failure
       }
 
-      // Never assume content[0] — a thinking or text block can precede the tool_use
-      // one, and the model may emit tools we did not force.
+      // Never assume content[0]. Under `tool_choice: auto` the model reasons first, so
+      // a `thinking` block and usually a `text` block PRECEDE the `tool_use` one — that
+      // ordering is the whole point of the change and this scan is what tolerates it.
       let toolUse: { name: string; input?: unknown } | undefined
       for (const block of parsed.data.content) {
         const candidate = anthropicToolUseBlockSchema.safeParse(block)
@@ -241,10 +340,14 @@ export function createAnthropicClient(apiKey: string): LlmClient {
         }
       }
 
-      // The model ignored a FORCED tool (typically an `end_turn` of prose). The
-      // transport is healthy and nothing is busy — a plain resample usually
-      // complies, so this is `retry/model_noncompliant`, not a server error, and it
-      // draws on its own tiny budget rather than the rate-limit pool.
+      // The model answered in prose instead of calling the tool. This is the price of
+      // `auto`, and it is the price we chose to pay: the route was already here, unused,
+      // because a forced tool made it unreachable.
+      //
+      // The transport is healthy and nothing is busy — a plain resample usually complies
+      // — so this is `retry/model_noncompliant`, not a server error, and it draws on its
+      // own tiny budget rather than the rate-limit pool. If it fires often for a given
+      // prompt, the fix is a better `toolDescription`, not a bigger budget.
       if (!toolUse) {
         const error = new LlmError({
           route: 'retry',
@@ -312,9 +415,18 @@ export function routeNonTerminalStop(
     case 'refusal':
       return deadLetterStop('refusal', 'Model refused the request', usage, signals)
 
-    // OUTPUT side: the input fit, generation was cut at the cap. The first remedy
-    // is a bigger budget (`withLlmRetry` doubles it); only once the ceiling is hit
-    // does the task actually need splitting.
+    // OUTPUT side: the input fit; generation was cut at the cap.
+    //
+    // There is no local remedy and deliberately so. A cut-off answer cannot be
+    // RESUMED — assistant-turn prefill is a 400 on every model in this table, and
+    // half-written tool JSON cannot be continued in any case — so the only "retry"
+    // available is a full resample that throws the paid-for generation away. We used
+    // to do exactly that, twice, doubling `max_tokens` each time; it existed only
+    // because a non-streaming request forced a low cap in the first place.
+    //
+    // Now that the adapter streams, callers set a budget generously and this stop
+    // means what it says: the answer does not fit in the model's output ceiling. No
+    // budget fixes that. Split the task.
     case 'max_tokens':
       return decomposeStop(
         'output_truncated',

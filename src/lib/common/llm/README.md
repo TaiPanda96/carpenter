@@ -15,7 +15,7 @@ below names the alternative it rejected and what breaks if the decision is wrong
 
 An LLM call has far more outcomes than `try { ... } catch { ... }` can express. A 429, a
 529, a refusal, a truncated answer, a prompt that never fit, and a model that ignored a
-forced tool are **six different problems with six different remedies** — and a `catch`
+tool are **six different problems with six different remedies** — and a `catch`
 block flattens them into one. So does a `retryable: boolean`.
 
 Three moves follow from that:
@@ -49,7 +49,7 @@ Everything else in this document is a consequence of those three.
    ├─ PRE-FLIGHT ─────────► decompose/input_too_large   (free — no paid request)
    │   count_tokens, but only when a free local estimate says we're near the limit
    │
-   ├─ sdk.messages.create(...)
+   ├─ sdk.messages.stream(...).finalMessage()   (streamed; same Message shape as create)
    │   └─ throws? ────────► routeThrownError(e)      [error tree below]
    │
    ├─ TRUST BOUNDARY: safeParse the wire response (a PROJECTION, not a mirror)
@@ -70,7 +70,9 @@ Everything else in this document is a consequence of those three.
 
  max_tokens ──────────────────────────► decompose / output_truncated
                                         OUTPUT side. The input fit; generation was cut
-                                        at the cap. Remedy: BIGGER BUDGET.
+                                        at the cap. NOT retried — a cut-off answer
+                                        can't be resumed, only re-bought.
+                                        Remedy: SPLIT THE TASK.
 
  model_context_window_exceeded ───────► decompose / input_too_large
                                         INPUT side. The prompt never fit.
@@ -104,7 +106,7 @@ Everything else in this document is a consequence of those three.
  unmapped status ─────────────► alert
 ```
 
-### The retry loop — four budgets, not one
+### The retry loop — three budgets, not one
 
 ```
  ROUTE / reason               REMEDY                        BUDGET (default)
@@ -116,18 +118,41 @@ Everything else in this document is a consequence of those three.
  retry / timeout              RESEND — may double-bill      unconfirmed   (1)
  retry / network              RESEND — may double-bill      unconfirmed   (1)
  retry / model_noncompliant   resample, NO sleep            resample      (1)
- decompose/output_truncated   grow budget, NO sleep         doubling      (2)
+ decompose/output_truncated   -> caller: split the TASK     none
  decompose/input_too_large    -> caller: chunk the INPUT    none
  dead_letter                  -> caller: human review       none
  cancelled                    -> caller: nobody to page     none
  alert                        -> caller: page someone       none
 ```
 
-Four counters, because a backoff costs **time**, a budget-doubling costs **exponential
-money**, and a resend after a timeout may cost **the same generation twice**. Under one
-shared counter, `truncate → 429 → truncate` exhausts a job having doubled the budget once
-and backed off once — it did neither remedy properly. Separate counters, and each remedy
-gets its full allowance.
+Three counters, because a backoff costs **time**, a resample of an ignored tool is
+near-certain to fail again, and a resend after a timeout may cost **the same generation
+twice**. Under one shared counter, `429 → noncompliant → 429` exhausts a job having
+resampled once and backed off once — it did neither remedy properly. Separate counters, and
+each remedy gets its full allowance.
+
+### Why a truncation is NOT retried
+
+This loop used to have a fourth budget: it doubled `max_tokens` and resent, up to twice.
+That was a mistake, and it is worth understanding why, because it *looked* exactly like a
+retry.
+
+A cut-off answer **cannot be resumed**. Assistant-turn prefill is a 400 on every model we
+support, and half-written tool JSON cannot be continued in any case. So every "retry" was a
+full **resample** that threw away a generation we had already paid for and rolled the dice
+again. A job needing 12k of output, starting at a 4k budget, paid `4k + 8k + 16k` for one
+16k answer — plus 3× the input tokens, plus 3× the latency.
+
+And the budget was only low in the first place because the adapter didn't stream: one HTTP
+response held open for a whole completion starts timing out somewhere north of 16k output
+tokens. That single transport fact leaked all the way up into the retry taxonomy.
+
+`max_tokens` is a **cap, not a reservation** — you are billed for what the model emits, so a
+64k cap on an 800-token answer costs exactly what a 1k cap would. A tight cap saves nothing
+and, when it bites, costs a whole discarded generation. So: the adapter streams, callers set
+the budget **generously** (it is a blast-radius guard against a looping model, not a number
+you expect to hit), and `output_truncated` goes back to meaning what it says — *this answer
+does not fit in the model's output ceiling*. No budget fixes that. Split the task.
 
 ---
 
@@ -144,7 +169,7 @@ under-reports the bill." Those aren't hypotheticals — they are what a naive
 
 **"Why not just retry on 5xx and 429?"**
 Because three of the six things that go wrong here don't come back as an HTTP error at all.
-A refusal is a **200 OK**. A truncation is a **200 OK**. A model ignoring a forced tool is a
+A refusal is a **200 OK**. A truncation is a **200 OK**. A model ignoring an offered tool is a
 **200 OK**. Status-code triage is blind to exactly the failures that are unique to an LLM.
 
 **"Why Zod if you already have TypeScript?"**
@@ -179,8 +204,11 @@ Scope discipline is part of the argument. None of these exist, and that's a deci
 
 - **No agentic tool loop.** No `continue` route, no `tool_use` mid-flight state. Add it in
   the same commit as the loop that needs it — see decision #22.
-- **No streaming.** The budget ceiling is 16k tokens precisely so we never need it. Above
-  that, the honest answer is "this wants streaming", not "tune the timeout".
+- **No streaming *interface*.** The adapter streams internally — `finalMessage()` returns the
+  same `Message` a `create()` did, so the transport never escapes the file. What we have not
+  built is a token-by-token API *for callers*; nobody needs one yet. (This used to read "no
+  streaming at all, the 16k ceiling is why" — that was the constraint that produced the
+  budget-doubling loop. See above.)
 - **No provider #2.** The seam (`LlmClient`) is what makes a second provider *possible*;
   building one now would be abstraction without a second concrete use case.
 - **No circuit breaker, no request coalescing, no cost budget enforcement.** All real, none
@@ -189,6 +217,35 @@ Scope discipline is part of the argument. None of these exist, and that's a deci
 ## Known gaps (say these before they're found)
 
 Being able to name your own holes is most of what "defensible" means.
+
+0. **`generateObject` should use structured outputs (`output_config.format`), not a tool.**
+   This is the one I'd fix next, and the reason is measured, not felt.
+
+   Forcing a tool (`tool_choice: {type: 'tool'}`) makes the model emit the tool call
+   *immediately* — which **suppresses reasoning entirely**. Same prompt, an invoice total
+   needing two arithmetic steps and a threshold check (truth: `209.07`, discount applied):
+
+   | `tool_choice` | `thinking` | blocks returned | out tokens | answer |
+   |---|---|---|---|---|
+   | `{type:'tool'}` | adaptive | `tool_use` | 63 | 211.86, false ❌ |
+   | `{type:'tool'}` | disabled | `tool_use` | 63 | 208.25, true ❌ |
+   | `{type:'any'}` | adaptive | `tool_use` | 69 | 210.55, false ❌ |
+   | `auto` | adaptive | `thinking,text,tool_use` | 369 | **209.07, true** ✅ |
+   | `output_config.format` | adaptive | `thinking,text` | 136 | **209.07, true** ✅ |
+
+   Read the token counts: under a forced tool, `adaptive` and `disabled` cost the *same*
+   63 tokens — no thinking block is emitted at all, so the `thinking` parameter is inert.
+   And the failure is the worst kind this seam can produce: a well-formed object that
+   **passes Zod, trips no route, and is confidently wrong**. Every piece of the triage
+   machinery above is blind to it.
+
+   **Shipped mitigation:** `tool_choice: 'auto'`. One line, correct answer, and it makes
+   `retry/model_noncompliant` — a route that already existed and was unreachable while the
+   tool was forced — finally earn its keep. **The real fix** is `output_config.format`: the
+   API guarantees the schema, so there is no tool to force and nothing to suppress, and it
+   got there in 136 tokens rather than 369. That change deletes `toolName`/`toolDescription`
+   from the contract and largely retires `model_noncompliant`, so it is a slice of its own.
+   Zod stays either way — the provider's guarantee is not ours.
 
 1. **`signals.requestId` means two different things.** On success it's `response.id` (the
    *message* id, `msg_…`); on failure it's `error.requestID` (the *request* id, `req_…`).
@@ -242,10 +299,10 @@ Each row: what we did, what we rejected, and **what breaks if the decision is wr
 |---|---|---|---|---|
 | 1 | Failures are **values** (`LlmOutcome`), not exceptions | `throw` on every non-2xx | Six failures, six remedies. A `catch` block flattens them into one and the caller re-derives the difference from a message string | Every call site invents its own triage, and they drift |
 | 2 | **Discriminated union**, not a bag of nullable fields | `{ ok, error?, retryAfter? }` | `{ok: true, error: 'refused'}` must not be *representable*. `switch (route)` is exhaustive with no `default:` to hide in — adding a route breaks every consumer at compile time | Illegal states typecheck; every consumer defensively re-checks what the type should have guaranteed |
-| 3 | **Route (treatment) ≠ reason (diagnosis)** | one `retryable: boolean` | A 529 and a truncated output are both "retryable", and need *opposite* remedies (wait vs. spend more budget). The boolean cannot say that | The retry loop waits politely for a truncation that will truncate identically, forever |
+| 3 | **Route (treatment) ≠ reason (diagnosis)** | one `retryable: boolean` | A 529 and a truncated output both look "retryable", and need *opposite* remedies (wait, vs. change the payload — no amount of waiting un-truncates an answer). The boolean cannot say that | The retry loop waits politely for a truncation that will truncate identically, forever |
 | 4 | **One taxonomy.** No `LlmError.kind` beside `route` | a private error enum | The old `kind` distinguished 401 from 403 but collapsed 500 into 529; the routes did exactly the opposite. Neither contained the other, so they were *guaranteed* to drift. The fine detail lives in `LlmSignals` — a receipt, not a second set of names | Two sources of truth for one decision. This one actually happened; both are deleted |
 | 5 | **Retries owned in exactly one layer** (`maxRetries: 0` on the SDK) | leave the SDK's 2 retries on | 2 SDK retries × N app retries = silent retry multiplication, and the SDK's retries are invisible to our budgets and our cost accounting | You back off 8× when you asked for 4×, and the bill doesn't explain itself |
-| 6 | **`input_too_large` ≠ `output_truncated`** | one `payload_too_large` | Chunking a document that fit fine will still truncate. Raising the budget on a prompt that never fit will still fail. **Same queue, opposite remedy** | The most expensive silent failure here: an infinite chunk-queue loop, or an infinite budget-doubling loop |
+| 6 | **`input_too_large` ≠ `output_truncated`** | one `payload_too_large` | Chunking a document that fit fine will still truncate. Raising the budget on a prompt that never fit will still fail. **Same queue, opposite fix** — chunk the INPUT vs. split the TASK | The most expensive silent failure here: an infinite chunk-queue loop that never shrinks the thing that was actually too big |
 | 7 | **`count_tokens` pre-flight** for oversized prompts | regex the 400's prose | Anthropic reports an over-long prompt as a plain `invalid_request_error` whose only tell is its wording. Reacting to that means (a) paying for a request to learn something computable, and (b) betting the chunk queue on a vendor not rewording a string. The regex survives as a **backstop**, and fails toward the DLQ (safe) | Vendor rewords the error → the chunk queue silently goes to zero |
 | 8 | Pre-flight is **gated behind a free local estimate** | always call `count_tokens` | It's cheap but not free — a real round trip. Most traffic is nowhere near the limit and never pays for it | A round trip on every call, for a check that almost never fires |
 | 9 | The estimator **over-counts** (`chars/3`, not `chars/4`) | the familiar `chars/4` | `chars/4` is OpenAI's tokenizer; it *under*-counts Claude by 15–20% (worse on code). **An under-counting guard is a guard that silently stops guarding.** Over-counting costs one extra `count_tokens`; under-counting costs a failed paid request | The guard waves through prompts that don't fit, and we pay to find out |
@@ -253,15 +310,16 @@ Each row: what we did, what we rejected, and **what breaks if the decision is wr
 | 11 | Strictly validate **model-generated content**; lightly validate the **envelope** | same rigour for both | The generated object is non-deterministic and is the thing that can lie. `stop_reason`/`usage` are transport | An LLM hallucination reaches the domain typed as valid |
 | 12 | Keep **`raw`** beside the parsed object | just return the parsed value | When a downstream grounding check says the model lied, `raw` is the only evidence of what it actually said | The DLQ reviewer has the verdict but not the exhibit |
 | 13 | Cache tokens are **nullable, not zero** | `?? 0` | `null` = the provider didn't report it. `0` = a genuine cache miss. Collapsing them makes a provider that **stopped reporting** look identical to a cache that **stopped working** | A cost dashboard that is quietly, confidently wrong |
-| 14 | **Four retry budgets** | one counter | See above: `truncate → 429 → truncate` exhausts a shared counter having done neither remedy properly | Jobs die with allowance unspent, and you can't tell which remedy starved |
-| 15 | **Timeout scales with the token budget** | fixed 30s | A timeout is a bet on how long generation takes, and doubling `maxTokens` doubles it. A fixed timeout means the **fix for a truncation manufactures a timeout** — which then routes as `retry` and hides the real cause | Truncation degrades into timeout, deterministically, and the signal points at the wrong thing |
+| 14 | **Three retry budgets** | one counter | See above: `429 → noncompliant → 429` exhausts a shared counter having done neither remedy properly | Jobs die with allowance unspent, and you can't tell which remedy starved |
+| 15 | **Stream every request; do NOT retry a truncation** | non-streaming `create()` + double `max_tokens` and resend | A cut-off answer cannot be *resumed* (prefill is a 400 on every current model), so a "retry" is a **full resample that discards a paid-for generation** — 4k + 8k + 16k for one 16k answer. And the budget was only tight because non-streaming `create()` times out north of ~16k output tokens. `max_tokens` is a **cap, not a reservation**: set it generously, stream, and let a truncation mean what it says | You pay 2–3× for every long answer, and the top rung of the doubling ladder (16k in 120s) can't even finish — it degrades into a timeout that hides the real cause |
+| 19 | **`thinking` set explicitly, defaulting to `adaptive`** | omit the field / hardcode `disabled` | Omitting it means *no thinking* on Opus 4.8/4.7 and *adaptive* on Sonnet 5 — and thinking tokens come out of `max_tokens`, so an omitted field silently changes what the same request costs per model. And the value belongs to the **caller**: a forced tool pins the *shape* of an answer, not the reasoning that produces it. A schema is very good at making a hard extraction (reconcile line items, resolve an entity, score a fuzzy match) look mechanical | Swap the model and the bill moves for reasons nobody wrote down; or you save a few thousand tokens and quietly get worse answers on exactly the tasks you built this for |
 | 16 | **Park**, don't block, when `retry-after` > `maxBackoffMs` | `sleep(retryAfterMs)` | `retry-after: 3600` is a real thing to receive. Sleeping it in-process pins a request and a Node process for an hour. The outcome carries the number — hand it back and let a **queue** park the job at zero cost | A one-hour hang that looks like a deadlock |
 | 17 | **Jitter**, via a `ctx.random` seam | plain exponential backoff | A fleet rate-limited *together* backs off together and stampedes together — the retry storm recreates the overload. Spreading them out **is** the point of the delay. Equal jitter (half guaranteed, half random), so we still genuinely back off | Thundering herd; your retries cause the next 429 |
 | 18 | Jitter goes **on top of** `retry-after`, never subtracted | jitter around it | Waiting *less* than the provider told you just burns a call. But every rate-limited client got the **same** number, so obeying it exactly re-synchronizes the fleet it was meant to spread | Either a wasted call or a synchronized herd |
 | 19 | **Usage is summed across attempts** | return the last attempt's usage | A retried call costs the sum of every attempt. The adapter deliberately keeps `usage` on a truncation *because a paid-for failure must not look free* — returning only the survivor throws that away one layer up | The cost dashboard under-reports exactly the failures the design set out to make visible |
 | 20 | **Timeout/network get their own tiny budget** | treat them like a 429 | The Messages API has **no idempotency key**, so a resend can't be deduped. A 429 is a *response* — the server refused, nothing was generated or billed. A timeout is not: the request may have run, generated, and **billed**, and we just stopped listening | You pay twice, generate twice, and nothing in the system says so |
 | 21 | **529 ≠ 500** | one `5xx` bucket | The SDK lumps them into `InternalServerError`. 529 is *capacity* (back off harder, don't page); 500 is *breakage* (an incident) | You page on-call for a busy provider, or you fail to page for a broken one |
-| 22 | `tool_use` is **not a route** | model it now, for the future loop | `complete()` sends no tools, and in `generateObject()` a forced `tool_use` **is** the terminal answer. A `continue` route today would be a type with no implementation and no way to fire. It gets added in the same commit as the loop that needs it — at which point the compiler forces every switch to handle it, loudly | Dead code that looks like a feature |
+| 22 | `tool_use` is **not a route** | model it now, for the future loop | `complete()` sends no tools, and in `generateObject()` an offered `tool_use` **is** the terminal answer. A `continue` route today would be a type with no implementation and no way to fire. It gets added in the same commit as the loop that needs it — at which point the compiler forces every switch to handle it, loudly | Dead code that looks like a feature |
 | 23 | Everything reachable through **`ctx` / `ContextWith<K>`** | import clients directly | A function's signature declares the exact IO it touches. It is the DI seam **and** the test seam — the same shape, with the outside world swapped for fakes | You can't unit-test the retry loop without a network and a real clock |
 | 24 | The retry loop declares `ContextWith<'sleep' \| 'random'>` — **not `'llm'`** | include `'llm'` | It reaches the model through a `call` closure; it never touches `ctx.llm`. `ContextWith` exists precisely so a signature **cannot lie** about its IO | The type says it does network IO when it doesn't. The seam stops being trustworthy |
 

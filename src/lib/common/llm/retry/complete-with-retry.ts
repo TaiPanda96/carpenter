@@ -5,8 +5,8 @@ import type { LlmCompletion } from '../contract/response'
 import { type RetryOptions, withLlmRetry } from './with-llm-retry'
 
 /**
- * Call the model for prose, executing the in-process remedies (backoff, budget
- * growth, resample) and returning the routed outcome for everything else.
+ * Call the model for prose, executing the in-process remedies (backoff, resample)
+ * and returning the routed outcome for everything else.
  *
  * It RETURNS an `LlmOutcome`; it does not throw. The caller switches on
  * `outcome.route` — and that switch IS the queue:

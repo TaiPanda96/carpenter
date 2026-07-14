@@ -1,5 +1,4 @@
 import type { ContextWith } from '@/lib/common/create-context'
-import { DEFAULT_TIMEOUT_MS } from '../contract/client'
 import type { LlmOutcome } from '../contract/outcome'
 import { type LlmUsage, addUsage } from '../contract/response'
 
@@ -21,21 +20,34 @@ import { type LlmUsage, addUsage } from '../contract/response'
  *   retry / timeout              RESEND — may double-bill      unconfirmed   (1)
  *   retry / network              RESEND — may double-bill      unconfirmed   (1)
  *   retry / model_noncompliant   resample, NO sleep            resample      (1)
- *   decompose/output_truncated   grow budget, NO sleep         doubling      (2)
+ *   decompose/output_truncated   -> caller: split the TASK     none
  *   decompose/input_too_large    -> caller: chunk the INPUT    none
  *   dead_letter                  -> caller: human review       none
  *   cancelled                    -> caller: nobody to page     none
  *   alert                        -> caller: page someone       none
  *
- * FOUR BUDGETS, NOT ONE. A backoff, a budget-doubling, a resample and a resend of a
- * request that may already have run are not the same kind of retry. Sharing a
- * counter between them lets a job run out of attempts having done none of them
- * properly — two 429s would eat the allowance a truncation needed. So:
+ * NO REMEDY FOR A TRUNCATION — and that is the correction, not an omission. This loop
+ * used to double `max_tokens` and resend, up to twice. It looked like a retry and it
+ * was not: a cut-off answer cannot be RESUMED (assistant-turn prefill is a 400 on
+ * every current model, and half-written tool JSON cannot be continued regardless), so
+ * every "retry" was a full resample that threw a paid-for generation away and rolled
+ * the dice again. A job needing 12k output starting at 4k paid 4k + 8k + 16k for one
+ * 16k answer.
+ *
+ * The loop existed to compensate for a low `max_tokens`, and the low `max_tokens`
+ * existed only because a non-streaming request times out somewhere north of 16k output
+ * tokens. The adapter streams now, so the cap can be set for what it actually is — a
+ * blast-radius guard, not a number you expect to hit (see `model-limits.ts`). Set the
+ * budget generously up front and a truncation goes back to meaning what it says: this
+ * answer does not fit in the model's output ceiling. No budget fixes that.
+ *
+ * THREE BUDGETS, NOT ONE. A backoff, a resample and a resend of a request that may
+ * already have run are not the same kind of retry. Sharing a counter between them lets
+ * a job run out of attempts having done none of them properly — two 429s would eat the
+ * allowance a resample needed. So:
  *
  *   transient    — the world was busy. Costs TIME. Four is cheap.
  *   unconfirmed  — we never heard back. Costs MONEY, maybe twice. See below.
- *   doubling     — the answer was cut. Costs EXPONENTIAL money: two doublings is
- *                  already 4x the output budget. Two, then escalate to the chunker.
  *   resample     — the model ignored a FORCED tool. Under `tool_choice: {type:
  *                  'tool'}` that should be near-impossible; if it happens twice it
  *                  will happen a third time. One, then give up fast.
@@ -60,9 +72,10 @@ import { type LlmUsage, addUsage } from '../contract/response'
  * (`maxUnconfirmedRetries`), and never HIDE it — every attempt's `usage` is summed
  * into the returned outcome, so a job that paid twice reports paying twice.
  *
- * `decompose/input_too_large` gets NO local remedy at all — the prompt never fit, so
- * a bigger output budget cannot help and a resend fails identically. It is returned
- * immediately so the chunk queue can split the INPUT.
+ * Both `decompose` reasons are returned immediately, because the two things this loop
+ * can change — WHEN we send and HOW MANY TIMES — are the two things neither of them
+ * responds to. The payload has to change, and only the caller can change it: chunk the
+ * INPUT for `input_too_large`, split the TASK for `output_truncated`.
  *
  * Everything else (`complete`, `dead_letter`, `cancelled`, `alert`) is the caller's
  * to route. This function is not allowed to have an opinion about them, which is why
@@ -82,8 +95,6 @@ export interface RetryOptions {
    * Each one risks paying and generating twice — see DOUBLE-BILL. Default 1.
    */
   maxUnconfirmedRetries?: number
-  /** Budget doublings after a truncation. Exponential in money. Default 2. */
-  maxBudgetDoublings?: number
   /** Resamples after the model ignores a forced tool. It will not comply. Default 1. */
   maxResamples?: number
   /** Base backoff in ms; the exponential is `base * 2^(attempt-1)`. Default 200. */
@@ -103,22 +114,17 @@ export interface RetryOptions {
    * exactly re-synchronizes the fleet it was supposed to spread out.
    */
   jitterMs?: number
-  /**
-   * Ceiling for the budget doubling. Default 16k — above that the SDK wants
-   * streaming anyway. The budget is CLAMPED to it, not gated by it: see the
-   * truncation branch.
-   */
-  maxTokensCeiling?: number
-  /**
-   * Ceiling for the timeout that grows with the budget. Default 2 minutes.
-   *
-   * A non-streaming request that needs longer than this has a streaming problem,
-   * not a timeout-tuning problem.
-   */
-  maxTimeoutMs?: number
 }
 
-export async function withLlmRetry<Req extends { maxTokens: number; timeoutMs?: number }, T>(
+/**
+ * `Req` is unconstrained on purpose.
+ *
+ * It used to require `{ maxTokens: number; timeoutMs?: number }`, because the loop
+ * REWROTE both of them to grow the budget after a truncation. It no longer rewrites
+ * anything — every remedy left is "send the same bytes again, maybe later" — so the
+ * request is now opaque to it, and the type says so.
+ */
+export async function withLlmRetry<Req, T>(
   // Only `'sleep'` and `'random'`, NOT `'llm'`. The model is reached through the
   // `call` closure, so this function never touches `ctx.llm` — and `ContextWith`
   // exists precisely so that a signature cannot lie about the IO it performs.
@@ -130,26 +136,21 @@ export async function withLlmRetry<Req extends { maxTokens: number; timeoutMs?: 
 ): Promise<LlmOutcome<T>> {
   const maxTransientRetries = opts.maxTransientRetries ?? 4
   const maxUnconfirmedRetries = opts.maxUnconfirmedRetries ?? 1
-  const maxBudgetDoublings = opts.maxBudgetDoublings ?? 2
   const maxResamples = opts.maxResamples ?? 1
   const backoffBaseMs = opts.backoffBaseMs ?? 200
   const maxBackoffMs = opts.maxBackoffMs ?? 30_000
   const jitterMs = opts.jitterMs ?? 1_000
-  const maxTokensCeiling = opts.maxTokensCeiling ?? 16_000
-  const maxTimeoutMs = opts.maxTimeoutMs ?? 120_000
 
   let transient = 0
   let unconfirmed = 0
-  let doublings = 0
   let resamples = 0
-  let current = req // never mutate the caller's request
 
   // The running bill. Every attempt's usage lands here, so what we finally return
   // is what the JOB cost, not what its last attempt cost.
   let spent: LlmUsage | null = null
 
   for (;;) {
-    const outcome = await call(current)
+    const outcome = await call(req)
     spent = addUsage(spent, outcome.usage)
 
     if (outcome.route === 'retry') {
@@ -191,49 +192,9 @@ export async function withLlmRetry<Req extends { maxTokens: number; timeoutMs?: 
       continue
     }
 
-    if (outcome.route === 'decompose' && outcome.reason === 'output_truncated') {
-      // THE GATE. Two questions, and nothing else escalates:
-      //
-      //     already AT the ceiling?  ──yes──► escalate to the chunk queue
-      //     out of doublings?        ──yes──► escalate to the chunk queue
-      //              │ no
-      //              ▼
-      //     maxTokens = min(maxTokens * 2, ceiling)   <- CLAMP, not a gate
-      //     timeoutMs = scaled by the same factor     <- grows WITH it
-      //              │
-      //              └──► resend. no sleep (nothing is busy).
-      //
-      // It gates on where we ALREADY ARE, not on where doubling WOULD take us, and
-      // that difference is the whole point. A request at 10k under a 16k ceiling
-      // doubles to 20k — over. But the honest reading of "over the ceiling" is "clamp
-      // to the ceiling and try", not "give up with 6k of authorized headroom unspent":
-      //
-      //     10k ─► 16k ─► escalate     (clamp: the headroom gets used)
-      //     10k ─► escalate            (gate on the doubled value: 6k stranded)
-      //
-      // Gating on the doubled value strands every budget that is not an exact power of
-      // two below the ceiling, and quietly ships jobs to the chunk queue that a bigger
-      // budget would have finished.
-      if (doublings >= maxBudgetDoublings || current.maxTokens >= maxTokensCeiling) {
-        return billed(outcome, spent)
-      }
-
-      const grown = Math.min(current.maxTokens * 2, maxTokensCeiling)
-      doublings++
-      current = {
-        ...current,
-        maxTokens: grown,
-        // The timeout has to grow WITH the budget. A timeout is a bet on how long
-        // generation takes, and we just asked for twice as much of it — leaving the
-        // old one in place means the remedy for the truncation manufactures a
-        // timeout, which then routes as `retry` and hides the real cause (the budget).
-        timeoutMs: grownTimeoutMs(current, grown, maxTimeoutMs),
-      }
-      // No backoff: nothing is busy and nothing is broken. We asked for an answer
-      // that did not fit. Sleeping here would only add latency.
-      continue
-    }
-
+    // Note what is NOT here: a `decompose` branch. Neither truncation nor an oversized
+    // prompt is fixed by sending the same bytes again, and this loop cannot change the
+    // bytes. Both fall through and go back to the caller with the running bill attached.
     return billed(outcome, spent)
   }
 }
@@ -278,17 +239,6 @@ function backoffMs(
   // half is random, so two clients that failed on the same tick do not retry on the
   // same tick. (Full jitter would allow a ~0ms retry, which is not a backoff at all.)
   return Math.round(exponential / 2 + random() * (exponential / 2))
-}
-
-/** Scale the timeout by the same factor the budget grew, then clamp. */
-function grownTimeoutMs(
-  current: { maxTokens: number; timeoutMs?: number },
-  grown: number,
-  maxTimeoutMs: number,
-): number {
-  const base = current.timeoutMs ?? DEFAULT_TIMEOUT_MS
-  const scaled = Math.ceil((base * grown) / current.maxTokens)
-  return Math.min(scaled, maxTimeoutMs)
 }
 
 /**

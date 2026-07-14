@@ -2,7 +2,12 @@ import { describe, expect, it } from 'bun:test'
 import Anthropic from '@anthropic-ai/sdk'
 import type { LlmSignals } from '../contract/disposition'
 import type { LlmCompletionStop, LlmUsage } from '../contract/response'
-import { parseRetryAfterMs, routeNonTerminalStop, routeThrownError } from './anthropic-adapter.io'
+import {
+  parseRetryAfterMs,
+  routeNonTerminalStop,
+  routeThrownError,
+  thinkingConfig,
+} from './anthropic-adapter.io'
 
 /**
  * The classification table IS the business rule here. It is the only thing in the
@@ -217,6 +222,27 @@ describe('routeNonTerminalStop — stop_reason to routing decision', () => {
     // Do not guess. The mapping is out of date and a human must see the raw value.
     expect(outcome?.route).toBe('alert')
     expect(outcome?.signals.rawStopReason).toBe('some_new_reason_2027')
+  })
+})
+
+describe('thinkingConfig', () => {
+  it('NEVER omits the field — an omitted `thinking` means different things per model', () => {
+    // This is the actual rule. Omitting it at the provider means NO thinking on
+    // claude-opus-4-8/4-7 and ADAPTIVE thinking on claude-sonnet-5. Since thinking
+    // tokens come out of `max_tokens`, an omitted field would silently change what the
+    // identical request costs, and how often it truncates, depending on the model.
+    expect(thinkingConfig(undefined)).toEqual({ type: 'adaptive' })
+    expect(thinkingConfig('adaptive')).toEqual({ type: 'adaptive' })
+    expect(thinkingConfig('disabled')).toEqual({ type: 'disabled' })
+  })
+
+  it('defaults to ADAPTIVE, not disabled — reasoning is the biggest quality lever there is', () => {
+    // The default was `disabled` for about an hour, justified by "generateObject forces
+    // a tool, so the shape is already pinned". That argument is wrong twice: it says
+    // nothing about `complete()` (no schema pins anything there), and a forced tool pins
+    // the SHAPE of an answer, not the reasoning that produces it — a schema is very good
+    // at making a hard extraction look mechanical.
+    expect(thinkingConfig(undefined)).toEqual({ type: 'adaptive' })
   })
 })
 

@@ -15,10 +15,12 @@ import { type RetryOptions, withLlmRetry } from './with-llm-retry'
  *                                  prose. Transport is fine; a resample complies.
  *                                  Own budget (default 1) — it will not comply on
  *                                  the third try either.
- *   decompose / 'output_truncated' the tool JSON was CUT OFF. `withLlmRetry`
- *                                  doubles the budget — an identical retry would
- *                                  truncate identically — and escalates to the
- *                                  chunk queue once the ceiling is hit.
+ *   decompose / 'output_truncated' the tool JSON was CUT OFF mid-object. Not retried:
+ *                                  a cut-off object cannot be CONTINUED, so the only
+ *                                  "retry" is a full resample that discards a
+ *                                  paid-for generation. Set `maxTokens` generously
+ *                                  (it is a cap, not a reservation) and this means
+ *                                  what it says — split the task.
  *   decompose / 'input_too_large'  the prompt never fit. Normally caught by the
  *                                  adapter's pre-flight BEFORE a request is paid
  *                                  for. No local remedy; chunk the input.
@@ -33,7 +35,7 @@ import { type RetryOptions, withLlmRetry } from './with-llm-retry'
  *
  * @example
  * const outcome = await generateObjectWithRetry(ctx, {
- *   model, prompt, maxTokens: 4096,
+ *   model, prompt, maxTokens: 32_000, // a guard, not an estimate — see LlmRequest
  *   schema: invoiceExtractionSchema, toolName: 'extract_invoice',
  * })
  * if (outcome.route === 'complete') use(outcome.value.object)

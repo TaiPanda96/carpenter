@@ -9,11 +9,14 @@ import { withLlmRetry } from './with-llm-retry'
  * The retry loop's whole job is knowing which remedy fits which route, and how much
  * of each remedy is worth spending. That is a business rule, so it is tested.
  *
- * Four budgets, not one. A backoff costs TIME, a budget-doubling costs EXPONENTIAL
- * MONEY, a resample of a forced tool is near-certain to fail again, and a resend
- * after a TIMEOUT may pay twice for a generation that already happened. Sharing one
- * counter between them lets a job run out of attempts having done none of them
- * properly.
+ * Three budgets, not one. A backoff costs TIME, a resample of a forced tool is
+ * near-certain to fail again, and a resend after a TIMEOUT may pay twice for a
+ * generation that already happened. Sharing one counter between them lets a job run
+ * out of attempts having done none of them properly.
+ *
+ * And one NON-remedy, which is the newest rule here: a truncation is not retried at
+ * all. See the truncation tests below for why the budget-doubling that used to live
+ * here was a mistake rather than a missing feature.
  */
 
 const REQ = { model: 'claude-opus-4-8', prompt: 'hi', maxTokens: 256 }
@@ -307,11 +310,11 @@ describe('withLlmRetry', () => {
   })
 
   it('SUMS the usage of every attempt — a job that paid twice must report paying twice', async () => {
-    // The adapter deliberately keeps `usage` on a truncation, because a truncated call
-    // is a paid-for failure and nulling it would make it look free. Returning only the
-    // final attempt's usage would destroy that one layer up: the 4k output tokens the
-    // truncated attempt burned were billed, and the cost dashboard has to see them.
-    const { call } = fakeCall((_r, n) => (n === 1 ? truncated() : complete()))
+    // A failed attempt that reached the model still burned tokens, and the adapter keeps
+    // `usage` on it for exactly that reason. Returning only the final attempt's usage
+    // would destroy that one layer up: the discarded generation was billed, and the cost
+    // dashboard has to see it.
+    const { call } = fakeCall((_r, n) => (n === 1 ? noncompliant() : complete()))
     const { sleep } = fakeSleep()
 
     const outcome = await withLlmRetry(ctxWith(sleep), REQ, call)
@@ -337,93 +340,34 @@ describe('withLlmRetry', () => {
     expect(outcome.usage).toMatchObject({ inputTokens: 2, outputTokens: 2 })
   })
 
-  it('DOUBLES maxTokens on a truncation and does NOT sleep — nothing is busy', async () => {
-    const { requests, call } = fakeCall((_r, n) => (n === 1 ? truncated() : complete()))
+  it('does NOT retry a truncation — a cut-off answer cannot be resumed, only re-bought', async () => {
+    // THE REGRESSION TEST FOR THE FIX. This loop used to double `maxTokens` and resend,
+    // up to twice. That is not a retry: a truncated answer cannot be CONTINUED
+    // (assistant-turn prefill is a 400 on every current model, and half-written tool
+    // JSON cannot be continued regardless), so each "retry" was a full resample that
+    // discarded a generation we had already paid for.
+    //
+    // The doubling only ever existed to compensate for a low `maxTokens`, and that was
+    // only forced by a non-streaming request. The adapter streams now. So a truncation
+    // means what it says — the answer does not fit in the model's output ceiling — and
+    // goes straight to the caller to split the task.
+    const { requests, call } = fakeCall(() => truncated())
     const { sleep, calls } = fakeSleep()
 
     const outcome = await withLlmRetry(ctxWith(sleep), REQ, call)
 
-    expect(outcome.route).toBe('complete')
-    expect(requests.map((r) => r.maxTokens)).toEqual([256, 512])
-    expect(REQ.maxTokens).toBe(256) // the caller's request is never mutated
-    expect(calls).toEqual([]) // a truncation is not a backoff — there is nothing to wait for
-  })
-
-  it('CLAMPS the grown budget to the ceiling instead of stranding the headroom', async () => {
-    // THE GATE. 10k doubles to 20k, which is over the 16k ceiling — but "over the
-    // ceiling" is a reason to clamp to 16k and try, not to escalate with 6k of
-    // authorized headroom unspent. Gating on the DOUBLED value (rather than on where we
-    // already are) would strand every budget that is not an exact power of two below the
-    // ceiling, and quietly ship jobs to the chunk queue that 16k would have finished.
-    const { requests, call } = fakeCall((_r, n) => (n === 1 ? truncated() : complete()))
-    const { sleep } = fakeSleep()
-
-    const outcome = await withLlmRetry(ctxWith(sleep), { ...REQ, maxTokens: 10_000 }, call, {
-      maxTokensCeiling: 16_000,
-      maxBudgetDoublings: 3,
-    })
-
-    // The old gate compared the DOUBLED value (20k) to the ceiling, found it over, and
-    // escalated — requests would have been just [10_000] and the outcome `decompose`,
-    // with 6k of authorized budget never spent. It now clamps to 16k and finishes.
-    expect(requests.map((r) => r.maxTokens)).toEqual([10_000, 16_000])
-    expect(outcome.route).toBe('complete')
-  })
-
-  it('escalates to the chunk queue only once the budget is AT the ceiling', async () => {
-    const { requests, call } = fakeCall(() => truncated())
-    const { sleep } = fakeSleep()
-
-    const outcome = await withLlmRetry(
-      ctxWith(sleep),
-      { ...REQ, maxTokens: 400 },
-      call,
-      // The ceiling bites before the doubling count does — the headroom is spent, and
-      // the task genuinely needs splitting.
-      { maxBudgetDoublings: 5, maxTokensCeiling: 1000 },
-    )
-
-    // 400 -> 800 -> 1000 (clamped), and only THEN escalate. The old gate stopped at 800.
-    expect(requests.map((r) => r.maxTokens)).toEqual([400, 800, 1000])
     expect(outcome.route).toBe('decompose')
     if (outcome.route !== 'decompose') throw new Error('unreachable')
     expect(outcome.reason).toBe('output_truncated')
+    expect(call).toHaveBeenCalledTimes(1) // ONE paid request, not three
+    expect(requests.map((r) => r.maxTokens)).toEqual([256]) // the budget is never rewritten
+    expect(calls).toEqual([])
   })
 
-  it('GROWS the timeout with the budget — the remedy must not manufacture a timeout', async () => {
-    // A timeout is a bet on how long generation takes, and we just asked for twice as
-    // much of it. Leaving the old 30s in place means the fix for `output_truncated`
-    // deterministically produces an `APIConnectionTimeoutError`, which then routes as
-    // `retry` and hides the real cause (the budget).
-    const { requests, call } = fakeCall((_r, n) => (n < 3 ? truncated() : complete()))
-    const { sleep } = fakeSleep()
-
-    await withLlmRetry(ctxWith(sleep), { ...REQ, maxTokens: 4_000, timeoutMs: 30_000 }, call, {
-      maxBudgetDoublings: 3,
-      maxTokensCeiling: 16_000,
-    })
-
-    expect(requests.map((r) => r.maxTokens)).toEqual([4_000, 8_000, 16_000])
-    expect(requests.map((r) => r.timeoutMs)).toEqual([30_000, 60_000, 120_000])
-  })
-
-  it('clamps the grown timeout — a request that needs longer wants STREAMING, not a bigger timeout', async () => {
-    const { requests, call } = fakeCall((_r, n) => (n < 3 ? truncated() : complete()))
-    const { sleep } = fakeSleep()
-
-    await withLlmRetry(ctxWith(sleep), { ...REQ, maxTokens: 4_000, timeoutMs: 30_000 }, call, {
-      maxBudgetDoublings: 3,
-      maxTokensCeiling: 16_000,
-      maxTimeoutMs: 45_000,
-    })
-
-    expect(requests.map((r) => r.timeoutMs)).toEqual([30_000, 45_000, 45_000])
-  })
-
-  it('does NOT grow the budget for an oversized INPUT — a bigger output cap cannot fix it', async () => {
-    // The distinction a single `payload_too_large` boolean would have erased: the prompt
-    // never fit, so doubling max_tokens is pure waste and a resend fails identically.
-    // Straight to the chunk queue, untouched.
+  it('does not retry an oversized INPUT either — a bigger output cap cannot fix it', async () => {
+    // The two decompose reasons share a route and a non-remedy, but NOT a fix: chunk the
+    // INPUT here, split the TASK for a truncation. That distinction is why they are two
+    // reasons and not one `payload_too_large` boolean.
     const { requests, call } = fakeCall(() => inputTooLarge())
     const { sleep, calls } = fakeSleep()
 
@@ -432,9 +376,21 @@ describe('withLlmRetry', () => {
     expect(outcome.route).toBe('decompose')
     if (outcome.route !== 'decompose') throw new Error('unreachable')
     expect(outcome.reason).toBe('input_too_large')
-    expect(call).toHaveBeenCalledTimes(1) // not retried at all
-    expect(requests.map((r) => r.maxTokens)).toEqual([256]) // budget untouched
+    expect(call).toHaveBeenCalledTimes(1)
+    expect(requests.map((r) => r.maxTokens)).toEqual([256])
     expect(calls).toEqual([])
+  })
+
+  it('still bills a truncation — one paid failure is cheaper than three, not free', async () => {
+    // Not retrying does not mean not paying. The generation ran to the cap and was
+    // billed; nulling the usage would make a paid-for failure look free to the cost
+    // dashboard, which is the exact thing the running bill exists to prevent.
+    const { call } = fakeCall(() => truncated())
+    const { sleep } = fakeSleep()
+
+    const outcome = await withLlmRetry(ctxWith(sleep), REQ, call)
+
+    expect(outcome.usage).toMatchObject({ inputTokens: 1, outputTokens: 1 })
   })
 
   it('resamples a noncompliant model WITHOUT backoff, and gives up fast', async () => {
@@ -453,24 +409,25 @@ describe('withLlmRetry', () => {
     expect(calls).toEqual([]) // never slept
   })
 
-  it('keeps the budgets SEPARATE — a truncation cannot eat the rate-limit budget', async () => {
+  it('keeps the budgets SEPARATE — a resample cannot eat the rate-limit budget', async () => {
     // THE regression this design exists to prevent. Under one shared counter of 2, this
-    // job would exhaust after truncate -> 429 -> truncate, having doubled the budget only
-    // once and backed off only once. With separate budgets, each remedy gets its full
-    // allowance and the job succeeds.
-    const script: Outcome[] = [truncated(), transient(), truncated(), transient(), complete()]
-    const { requests, call } = fakeCall((_r, n) => script[n - 1] ?? complete())
+    // job would exhaust after 429 -> noncompliant -> 429, having resampled only once and
+    // backed off only once. With separate budgets each remedy gets its full allowance,
+    // and the job succeeds on the fourth attempt.
+    const script: Outcome[] = [transient(), noncompliant(), transient(), complete()]
+    const { call } = fakeCall((_r, n) => script[n - 1] ?? complete())
     const { sleep, calls } = fakeSleep()
 
     const outcome = await withLlmRetry(ctxWith(sleep), REQ, call, {
+      maxTransientRetries: 2,
+      maxResamples: 1,
       backoffBaseMs: 10,
     })
 
     expect(outcome.route).toBe('complete')
-    // Budget doubled twice (256 -> 512 -> 1024), independent of the two backoffs.
-    expect(requests.map((r) => r.maxTokens)).toEqual([256, 512, 512, 1024, 1024])
-    expect(calls).toEqual([5, 10]) // both backoffs happened, on their own counter
-    // Three of the five attempts produced a usage record; all three were billed.
-    expect(outcome.usage).toMatchObject({ inputTokens: 3, outputTokens: 3 })
+    expect(call).toHaveBeenCalledTimes(4)
+    // Two backoffs on the transient counter; the resample slept for nothing in between,
+    // because nothing was busy.
+    expect(calls).toEqual([5, 10])
   })
 })
